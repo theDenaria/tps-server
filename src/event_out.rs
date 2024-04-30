@@ -28,7 +28,7 @@ impl EventOut {
         let position_event = PositionEvent { positions };
 
         let mut serialized = bincode::serialize(&position_event).unwrap();
-        serialized.insert(0, 1);
+        serialized.insert(0, 1); // Move Event Type 1
         Some(EventOut {
             event_type: EventOutType::Position,
             data: serialized,
@@ -55,7 +55,7 @@ impl EventOut {
 
         let mut serialized = bincode::serialize(&spawn_event).unwrap();
 
-        serialized.insert(0, 0);
+        serialized.insert(0, 0); // Spawn Event Type 0
 
         Some(EventOut {
             event_type: EventOutType::Spawn,

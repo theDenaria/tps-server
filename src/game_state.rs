@@ -33,9 +33,11 @@ impl GameState {
 }
 
 pub struct Player {
+    // Metadata
     pub id: String,
     pub connection_status: ConnectionStatus,
     pub addr: SocketAddr,
+    // State attributes
     pub position: PlayerPosition,
     speed: f32,
 }
@@ -71,6 +73,7 @@ pub enum ConnectionStatus {
 
 #[derive(Debug, Clone, Copy)]
 pub struct PlayerPosition {
+    //TODO pub updated: bool,
     pub x: f32,
     pub y: f32,
 }
