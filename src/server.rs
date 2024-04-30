@@ -160,13 +160,26 @@ impl Server {
 
         let position_event = EventOut::position_event(game_state.all_players());
 
+        let pending_players_connection = connection_handler.get_pending_players().await;
         let mut pending_players: Vec<&Player> = vec![];
-        for connection in connection_handler.pending.lock().await.values() {
+
+        for connection in pending_players_connection {
             match game_state.get_player(connection.player_id.clone()) {
                 Some(pl) => pending_players.push(pl),
                 None => {}
             }
         }
+
+        let connected_players_connection = connection_handler.get_connected_players().await;
+        let mut connected_players: Vec<&Player> = vec![];
+
+        for connection in connected_players_connection {
+            match game_state.get_player(connection.player_id.clone()) {
+                Some(pl) => connected_players.push(pl),
+                None => {}
+            }
+        }
+
         let spawn_event = EventOut::spawn_event(pending_players);
         let players = game_state.all_players();
         for player in players {
@@ -210,6 +223,21 @@ impl Server {
                     };
 
                     if let Some(identifier) = maybe_identifier {
+                        let spawn_event_connected_player =
+                            EventOut::spawn_event(connected_players.clone());
+
+                        if let Some(con_se) = spawn_event_connected_player {
+                            println!("Sent : {:?}", con_se);
+                            let mut packet = identifier.clone();
+                            packet.extend(con_se.data.clone());
+                            socket
+                                .lock()
+                                .await
+                                .send_to(packet.as_slice(), player.addr)
+                                .await
+                                .unwrap();
+                        }
+
                         if let Some(ref se) = spawn_event {
                             println!("Sent : {:?}", se);
                             let mut packet = identifier.clone();
@@ -245,6 +273,7 @@ impl Server {
 
                 let msg = buf[..len].to_vec();
                 tx.send((msg, addr)).await.unwrap(); // Send message to game logic
+                thread::sleep(Duration::from_millis(1));
             }
         });
     }
@@ -298,8 +327,18 @@ impl ConnectionHandler {
             None => false,
         }
     }
+
+    pub async fn get_pending_players(&mut self) -> Vec<Connection> {
+        let guard = self.pending.lock().await;
+        guard.values().cloned().collect()
+    }
+    pub async fn get_connected_players(&mut self) -> Vec<Connection> {
+        let guard = self.connected.lock().await;
+        guard.values().cloned().collect()
+    }
 }
 
+#[derive(Clone)]
 struct Connection {
     pub identifier: Vec<u8>,
     pub player_id: String,
