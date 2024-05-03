@@ -32,6 +32,7 @@ pub enum EventInType {
     Connect = 0,
     ConnectConfirm = 1,
     Move = 2,
+    Rotation = 3,
     Invalid = 99,
 }
 
@@ -54,6 +55,7 @@ impl TryFrom<u8> for EventInType {
             0 => Ok(EventInType::Connect),
             1 => Ok(EventInType::ConnectConfirm),
             2 => Ok(EventInType::Move),
+            3 => Ok(EventInType::Rotation),
             _ => Ok(EventInType::Invalid),
         }
     }
@@ -76,6 +78,21 @@ pub fn digest_move_event(data: Vec<u8>) -> Result<MoveEvent, &'static str> {
     let y = f32::from_ne_bytes(y_bytes);
 
     Ok(MoveEvent { x, y })
+}
+
+pub fn digest_rotation_event(data: Vec<u8>) -> Result<f32, &'static str> {
+    if data.len() < 4 {
+        println!("Insufficent bytes: {:?}", data);
+        return Err("Insufficient bytes for MoveInputUpdate");
+    }
+
+    let rotation_bytes = data[0..4]
+        .try_into()
+        .map_err(|_| "Failed to slice x bytes")?;
+
+    let rotation = f32::from_ne_bytes(rotation_bytes);
+
+    Ok(rotation)
 }
 
 pub fn digest_connect_event(data: Vec<u8>) -> Result<ConnectEvent, &'static str> {

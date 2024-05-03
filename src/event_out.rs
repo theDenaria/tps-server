@@ -10,29 +10,46 @@ pub struct EventOut {
 }
 
 impl EventOut {
-    pub fn position_event(players: Vec<&Player>) -> Option<EventOut> {
+    pub fn get_with_event_header(&self, identifier: Vec<u8>) -> Vec<u8> {
+        let mut with_header: Vec<u8> = vec![];
+        with_header.push(1);
+
+        with_header.extend(identifier);
+        with_header.push(0);
+        with_header.extend(self.data.clone());
+        with_header
+    }
+
+    pub fn position_event(players: Vec<&mut Player>) -> Option<EventOut> {
         let player_num = players.len() as u32;
         if player_num < 1 {
             return None;
         }
         let mut positions: Vec<Position> = vec![];
         for player in players {
-            let player_id_bytes = normalize_player_id(player.id.as_str());
-            positions.push(Position {
-                player_id: player_id_bytes,
-                x: player.position.x,
-                y: player.position.y,
+            if player.position.updated {
+                let player_id_bytes = normalize_player_id(player.id.as_str());
+                positions.push(Position {
+                    player_id: player_id_bytes,
+                    x: player.position.x,
+                    y: player.position.y,
+                    rotation: player.rotation,
+                });
+                player.set_position_updated(false);
+            }
+        }
+        if positions.len() > 0 {
+            let position_event = PositionEvent { positions };
+            tracing::info!("{:?}", position_event);
+
+            let mut serialized = bincode::serialize(&position_event).unwrap();
+            serialized.insert(0, 1); // Move Event Type 1
+            return Some(EventOut {
+                event_type: EventOutType::Position,
+                data: serialized,
             });
         }
-
-        let position_event = PositionEvent { positions };
-
-        let mut serialized = bincode::serialize(&position_event).unwrap();
-        serialized.insert(0, 1); // Move Event Type 1
-        Some(EventOut {
-            event_type: EventOutType::Position,
-            data: serialized,
-        })
+        None
     }
 
     pub fn spawn_event(players: Vec<&Player>) -> Option<EventOut> {
@@ -48,6 +65,7 @@ impl EventOut {
                 player_id: player_id_bytes,
                 x: player.position.x,
                 y: player.position.y,
+                rotation: player.rotation,
             });
         }
 
@@ -88,4 +106,5 @@ struct Position {
     player_id: [u8; 16],
     x: f32,
     y: f32,
+    rotation: f32,
 }
