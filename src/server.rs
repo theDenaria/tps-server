@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::thread;
@@ -7,7 +6,10 @@ use tokio::net::UdpSocket;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{mpsc, Mutex};
 
-use crate::event_in::{digest_connect_event, digest_move_event, EventIn, EventInType};
+use crate::connection_handler::ConnectionHandler;
+use crate::event_in::{
+    digest_connect_event, digest_move_event, digest_rotation_event, EventIn, EventInType,
+};
 use crate::event_out::EventOut;
 use crate::game_state::{ConnectionStatus, GameState, Player};
 use crate::packet::{MessageType, Packet};
@@ -47,7 +49,7 @@ impl Server {
 
                 // Process all available messages
                 while let Ok((message, addr)) = rx.try_recv() {
-                    if message.len() > 0 {
+                    if message.len() > 8 {
                         let self_clone = self.clone();
                         tokio::runtime::Runtime::new().unwrap().block_on(async {
                             self_clone.process_client_messages(message, addr).await;
@@ -83,14 +85,23 @@ impl Server {
         let packet = Packet::new(message);
         let socket = self.socket.clone();
         let game_state = self.game_state.clone();
-        let connection_handler = self.connection_handler.clone();
+        let mut connection_handler = self.connection_handler.lock().await;
+        let packet_identifier = packet.get_message_header().clone();
+        connection_handler.set_last_message_time(packet_identifier.clone());
 
         match packet.message_type {
             MessageType::Event => {
                 let payload = packet.get_event_payload();
                 let event = EventIn::new(payload).unwrap();
-                println!("Received: {:?}", event);
+                tracing::info!("Received: {:?}", event);
                 match event.event_type {
+                    EventInType::Rotation => {
+                        let rotation_input = digest_rotation_event(event.data).unwrap();
+                        let mut game_state = game_state.lock().await;
+                        if let Some(player) = game_state.get_player_mut(event.player_id) {
+                            player.update_rotation(rotation_input);
+                        }
+                    }
                     EventInType::Move => {
                         let move_input = digest_move_event(event.data).unwrap();
                         let mut game_state = game_state.lock().await;
@@ -99,15 +110,12 @@ impl Server {
                         }
                     }
                     EventInType::Connect => {
-                        let packet_header = packet.get_event_header().clone();
                         let _connect_event = digest_connect_event(event.data).unwrap();
                         let player_id = event.player_id;
 
-                        let is_new = connection_handler
-                            .lock()
-                            .await
-                            .new_connection(&player_id, packet_header)
-                            .await;
+                        let is_new =
+                            connection_handler.new_connection(&player_id, packet_identifier);
+
                         // This means already added this player
                         let mut game_state = game_state.lock().await;
                         if is_new {
@@ -139,7 +147,7 @@ impl Server {
                     .send_to(packet.raw.as_slice(), addr)
                     .await
                     .unwrap();
-                println!("{:?} Connect ack bytes sent", packet);
+                tracing::info!("{:?} Connect ack bytes sent", packet);
             }
             MessageType::KeepAlive => {
                 socket
@@ -155,12 +163,16 @@ impl Server {
 
     async fn send_game_state_updates(&self) {
         let socket = self.socket.clone();
-        let game_state = self.game_state.lock().await;
-        let mut connection_handler = self.connection_handler.lock().await; //clone();
+        let mut game_state = self.game_state.lock().await;
+        let mut connection_handler = self.connection_handler.lock().await;
 
-        let position_event = EventOut::position_event(game_state.all_players());
+        connection_handler.check_timeout();
 
-        let pending_players_connection = connection_handler.get_pending_players().await;
+        let all_players_mut = game_state.all_players_mut();
+
+        let position_event = EventOut::position_event(all_players_mut);
+
+        let pending_players_connection = connection_handler.get_pending_connections();
         let mut pending_players: Vec<&Player> = vec![];
 
         for connection in pending_players_connection {
@@ -170,7 +182,7 @@ impl Server {
             }
         }
 
-        let connected_players_connection = connection_handler.get_connected_players().await;
+        let connected_players_connection = connection_handler.get_connected_connections();
         let mut connected_players: Vec<&Player> = vec![];
 
         for connection in connected_players_connection {
@@ -181,55 +193,45 @@ impl Server {
         }
 
         let spawn_event = EventOut::spawn_event(pending_players);
+
         let players = game_state.all_players();
         for player in players {
             match player.connection_status {
                 ConnectionStatus::Connected => {
-                    let identifier = connection_handler
-                        .connected
-                        .lock()
-                        .await
-                        .get(&player.id)
-                        .unwrap()
-                        .identifier
-                        .clone();
-                    if let Some(ref pe) = position_event {
-                        let mut packet = identifier.clone();
-                        packet.extend(pe.data.clone());
-                        println!("Sent: {:?}", pe);
-                        socket
-                            .lock()
-                            .await
-                            .send_to(packet.as_slice(), player.addr)
-                            .await
-                            .unwrap();
-                    }
-                    if let Some(ref se) = spawn_event {
-                        println!("Sent : {:?}", se);
-                        let mut packet = identifier.clone();
-                        packet.extend(se.data.clone());
-                        socket
-                            .lock()
-                            .await
-                            .send_to(packet.as_slice(), player.addr)
-                            .await
-                            .unwrap();
+                    let maybe_identifier = connection_handler.get_connected_identifier(&player.id);
+
+                    if let Some(identifier) = maybe_identifier {
+                        if let Some(ref pe) = position_event {
+                            let packet = pe.get_with_event_header(identifier.clone());
+                            tracing::info!("Sent: {:?}", pe);
+                            socket
+                                .lock()
+                                .await
+                                .send_to(packet.as_slice(), player.addr)
+                                .await
+                                .unwrap();
+                        }
+                        if let Some(ref se) = spawn_event {
+                            tracing::info!("Sent : {:?}", se);
+                            let packet = se.get_with_event_header(identifier.clone());
+                            socket
+                                .lock()
+                                .await
+                                .send_to(packet.as_slice(), player.addr)
+                                .await
+                                .unwrap();
+                        }
                     }
                 }
                 ConnectionStatus::Connecting => {
-                    let maybe_identifier = {
-                        let guard = connection_handler.pending.lock().await;
-                        guard.get(&player.id).map(|info| info.identifier.clone())
-                    };
-
+                    let maybe_identifier = connection_handler.get_pending_identifier(&player.id);
                     if let Some(identifier) = maybe_identifier {
                         let spawn_event_connected_player =
                             EventOut::spawn_event(connected_players.clone());
 
                         if let Some(con_se) = spawn_event_connected_player {
-                            println!("Sent : {:?}", con_se);
-                            let mut packet = identifier.clone();
-                            packet.extend(con_se.data.clone());
+                            tracing::info!("Sent : {:?}", con_se);
+                            let packet = con_se.get_with_event_header(identifier.clone());
                             socket
                                 .lock()
                                 .await
@@ -239,9 +241,8 @@ impl Server {
                         }
 
                         if let Some(ref se) = spawn_event {
-                            println!("Sent : {:?}", se);
-                            let mut packet = identifier.clone();
-                            packet.extend(se.data.clone());
+                            tracing::info!("Sent : {:?}", se);
+                            let packet = se.get_with_event_header(identifier.clone());
                             socket
                                 .lock()
                                 .await
@@ -249,9 +250,7 @@ impl Server {
                                 .await
                                 .unwrap();
                         }
-
-                        // Now that the lock guard is dropped, we can perform a mutable borrow
-                        connection_handler.set_connected(&player.id).await;
+                        connection_handler.set_connected(&player.id);
                     }
                 } //TODO ConnectionStatus::Disconnected => {}
             }
@@ -273,7 +272,7 @@ impl Server {
 
                 let msg = buf[..len].to_vec();
                 tx.send((msg, addr)).await.unwrap(); // Send message to game logic
-                thread::sleep(Duration::from_millis(1));
+                tokio::time::sleep(Duration::from_millis(1)).await;
             }
         });
     }
@@ -281,65 +280,4 @@ impl Server {
 
 pub struct ServerOptions {
     tick_rate: f32,
-}
-
-struct ConnectionHandler {
-    pub pending: Mutex<HashMap<String, Connection>>,
-    pub connected: Mutex<HashMap<String, Connection>>,
-}
-
-impl ConnectionHandler {
-    pub fn new() -> ConnectionHandler {
-        ConnectionHandler {
-            pending: Mutex::new(HashMap::new()),
-            connected: Mutex::new(HashMap::new()),
-        }
-    }
-    /// Returns false if this connection as is already initialized
-    pub async fn new_connection(&mut self, player_id: &String, identifier: Vec<u8>) -> bool {
-        let mut pending = self.pending.lock().await;
-        if let Some(_) = pending.get(player_id) {
-            return false;
-        }
-        let new_connection = Connection {
-            identifier: identifier.clone(),
-            player_id: player_id.clone(),
-        };
-        pending.insert(player_id.clone(), new_connection);
-        true
-    }
-
-    pub async fn set_connected(&mut self, player_id: &String) -> bool {
-        let mut pending = self.pending.lock().await;
-
-        match pending.get(player_id) {
-            Some(pend) => {
-                let mut connected = self.connected.lock().await;
-                let new_connection = Connection {
-                    identifier: pend.identifier.clone(),
-                    player_id: player_id.clone(),
-                };
-                connected.insert(player_id.clone(), new_connection);
-                pending.remove(player_id);
-
-                true
-            }
-            None => false,
-        }
-    }
-
-    pub async fn get_pending_players(&mut self) -> Vec<Connection> {
-        let guard = self.pending.lock().await;
-        guard.values().cloned().collect()
-    }
-    pub async fn get_connected_players(&mut self) -> Vec<Connection> {
-        let guard = self.connected.lock().await;
-        guard.values().cloned().collect()
-    }
-}
-
-#[derive(Clone)]
-struct Connection {
-    pub identifier: Vec<u8>,
-    pub player_id: String,
 }
