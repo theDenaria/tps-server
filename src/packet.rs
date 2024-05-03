@@ -18,8 +18,16 @@ impl Packet {
         let remove_header = self.raw.iter().skip(10).cloned().collect();
         remove_header
     }
-    pub fn get_event_header(&self) -> Vec<u8> {
-        self.raw[0..10].to_vec()
+    pub fn get_message_header(&self) -> Vec<u8> {
+        let message_type = MessageType::try_from(self.raw[0]).unwrap();
+        match message_type {
+            MessageType::Event => self.raw[1..9].to_vec(),
+            MessageType::KeepAlive => self.raw[1..9].to_vec(),
+            MessageType::Connect => self.raw[5..13].to_vec(),
+            _ => {
+                vec![]
+            }
+        }
     }
 }
 
