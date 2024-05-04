@@ -144,10 +144,10 @@ impl Server {
                 socket
                     .lock()
                     .await
-                    .send_to(packet.raw.as_slice(), addr)
+                    .send_to(packet.get_connect_ack_raw().as_slice(), addr)
                     .await
                     .unwrap();
-                tracing::info!("{:?} Connect ack bytes sent", packet);
+                tracing::info!("{:?} Connect ack bytes sent", packet.get_connect_ack_raw());
             }
             MessageType::KeepAlive => {
                 socket
@@ -157,7 +157,12 @@ impl Server {
                     .await
                     .unwrap();
             }
-            _ => {}
+            MessageType::Disconnect => {
+                tracing::info!("DISCONNECT PACKET: {:?}", packet);
+            }
+            MessageType::Other => {
+                tracing::info!("OTHER PACKET: {:?}", packet);
+            }
         }
     }
 

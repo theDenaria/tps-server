@@ -14,6 +14,12 @@ impl Packet {
             raw: buffer.to_vec(),
         }
     }
+    pub fn get_connect_ack_raw(&self) -> Vec<u8> {
+        let mut connect_ack = self.raw.clone();
+        connect_ack[4] = 2;
+        connect_ack
+    }
+
     pub fn get_event_payload(&self) -> Vec<u8> {
         let remove_header = self.raw.iter().skip(10).cloned().collect();
         remove_header
@@ -34,9 +40,9 @@ impl Packet {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum MessageType {
     /// Client
-    Disconnect = 0,
     Connect = 85,
     Event = 1,
+    Disconnect = 2,
     KeepAlive = 3,
     Other = 11,
 }
@@ -46,9 +52,9 @@ impl TryFrom<u8> for MessageType {
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
-            0 => Ok(MessageType::Disconnect),
             85 => Ok(MessageType::Connect),
             1 => Ok(MessageType::Event),
+            2 => Ok(MessageType::Disconnect),
             3 => Ok(MessageType::KeepAlive),
             _ => Ok(MessageType::Other),
         }
