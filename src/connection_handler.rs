@@ -7,6 +7,7 @@ static CONNECTION_TIMEOUT_SECS: u64 = 5;
 pub struct ConnectionHandler {
     pub pending_index: ConnectionIndex,
     pub connected_index: ConnectionIndex,
+    pub disconnected_index: Vec<String>,
 }
 
 impl ConnectionHandler {
@@ -14,6 +15,7 @@ impl ConnectionHandler {
         ConnectionHandler {
             pending_index: ConnectionIndex::new(),
             connected_index: ConnectionIndex::new(),
+            disconnected_index: vec![],
         }
         .into()
     }
@@ -62,6 +64,12 @@ impl ConnectionHandler {
         }
     }
 
+    pub fn set_disconnected(&mut self, player_id: &String) {
+        self.connected_index
+            .remove_connection(Some(player_id), None);
+        self.disconnected_index.push(player_id.clone());
+    }
+
     pub fn set_last_message_time(&mut self, identifier: Vec<u8>) {
         match self.get_connected_connection(None, Some(identifier.clone())) {
             Some(con) => self
@@ -74,7 +82,8 @@ impl ConnectionHandler {
         }
     }
 
-    pub fn check_timeout(&mut self) {
+    pub fn check_timeout(&mut self) -> Vec<String> {
+        let mut timed_out_players: Vec<String> = vec![];
         let time_now = Instant::now();
         for con in self.get_connected_connections() {
             if time_now.duration_since(con.last_message_time)
@@ -82,6 +91,8 @@ impl ConnectionHandler {
             {
                 self.connected_index
                     .remove_connection(Some(&con.player_id), None);
+                timed_out_players.push(con.player_id.clone());
+                self.disconnected_index.push(con.player_id.clone());
                 tracing::info!("Player: {:?} connection has timed out", con.player_id);
             }
         }
@@ -91,12 +102,15 @@ impl ConnectionHandler {
             {
                 self.connected_index
                     .remove_connection(Some(&con.player_id), None);
+                timed_out_players.push(con.player_id.clone());
+                self.disconnected_index.push(con.player_id.clone());
                 tracing::info!(
                     "Player: {:?} pending connection has timed out",
                     con.player_id
                 );
             }
         }
+        timed_out_players
     }
 
     pub fn get_pending_connections(&self) -> Vec<Connection> {
@@ -108,6 +122,14 @@ impl ConnectionHandler {
             .values()
             .cloned()
             .collect()
+    }
+
+    pub fn get_disconnected_player_ids(&self) -> Vec<String> {
+        self.disconnected_index.clone()
+    }
+
+    pub fn clean_disconnected_list(&mut self) {
+        self.disconnected_index = vec![];
     }
 
     pub fn get_pending_connection(
@@ -137,6 +159,22 @@ impl ConnectionHandler {
     pub fn get_pending_identifier(&self, player_id: &String) -> Option<Vec<u8>> {
         match self.get_pending_connection(Some(player_id), None) {
             Some(con) => Some(con.identifier.clone()),
+            None => None,
+        }
+    }
+
+    pub fn get_connected_player_id(&self, identifier: Vec<u8>) -> Option<String> {
+        match self.get_connected_connection(None, Some(identifier)) {
+            Some(con) => {
+                return Some(con.player_id);
+            }
+            None => None,
+        }
+    }
+
+    pub fn get_pending_player_id(&self, identifier: Vec<u8>) -> Option<String> {
+        match self.get_pending_connection(None, Some(identifier)) {
+            Some(con) => Some(con.player_id),
             None => None,
         }
     }

@@ -80,6 +80,31 @@ impl EventOut {
             data: serialized,
         })
     }
+    pub fn disconnect_event(player_ids: Vec<String>) -> Option<EventOut> {
+        let player_num = player_ids.len() as u32;
+        if player_num < 1 {
+            return None;
+        }
+        let mut disconnects: Vec<DisconnectDetails> = vec![];
+
+        for player_id in player_ids {
+            let player_id_bytes = normalize_player_id(player_id.as_str());
+            disconnects.push(DisconnectDetails {
+                player_id: player_id_bytes,
+            });
+        }
+
+        let disconnect_event = DisconnectEvent { disconnects };
+
+        let mut serialized = bincode::serialize(&disconnect_event).unwrap();
+
+        serialized.insert(0, 10); // Disconnect Event Type 10
+
+        Some(EventOut {
+            event_type: EventOutType::Disconnect,
+            data: serialized,
+        })
+    }
 }
 
 fn normalize_player_id(player_id: &str) -> [u8; 16] {
@@ -94,6 +119,7 @@ fn normalize_player_id(player_id: &str) -> [u8; 16] {
 pub enum EventOutType {
     Spawn = 0,
     Position = 1,
+    Disconnect = 10,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -107,4 +133,14 @@ struct Position {
     x: f32,
     y: f32,
     rotation: f32,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct DisconnectEvent {
+    disconnects: Vec<DisconnectDetails>,
+}
+#[derive(Serialize, Deserialize, Debug)]
+
+struct DisconnectDetails {
+    player_id: [u8; 16],
 }

@@ -19,6 +19,10 @@ impl GameState {
         id
     }
 
+    pub fn remove_player(&mut self, id: String) {
+        self.players.remove(&id);
+    }
+
     pub fn get_player_mut(&mut self, id: String) -> Option<&mut Player> {
         self.players.get_mut(&id)
     }

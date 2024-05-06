@@ -8,7 +8,8 @@ use tokio::sync::{mpsc, Mutex};
 
 use crate::connection_handler::ConnectionHandler;
 use crate::event_in::{
-    digest_connect_event, digest_move_event, digest_rotation_event, EventIn, EventInType,
+    digest_connect_event, digest_disconnect_event, digest_move_event, digest_rotation_event,
+    EventIn, EventInType,
 };
 use crate::event_out::EventOut;
 use crate::game_state::{ConnectionStatus, GameState, Player};
@@ -137,6 +138,17 @@ impl Server {
                             }
                         }
                     }
+                    EventInType::Disconnect => {
+                        let disconnect_event = digest_disconnect_event(event.data).unwrap();
+
+                        if let Some(player_id) =
+                            connection_handler.get_connected_player_id(packet_identifier)
+                        {
+                            let mut game_state = game_state.lock().await;
+                            game_state.remove_player(player_id.clone());
+                            connection_handler.set_disconnected(&player_id);
+                        }
+                    }
                     EventInType::Invalid => {}
                 }
             }
@@ -171,7 +183,11 @@ impl Server {
         let mut game_state = self.game_state.lock().await;
         let mut connection_handler = self.connection_handler.lock().await;
 
-        connection_handler.check_timeout();
+        let timed_out_players = connection_handler.check_timeout();
+
+        for player_id in timed_out_players {
+            game_state.remove_player(player_id.clone());
+        }
 
         let all_players_mut = game_state.all_players_mut();
 
@@ -199,6 +215,12 @@ impl Server {
 
         let spawn_event = EventOut::spawn_event(pending_players);
 
+        let disconnect_player_ids = connection_handler.get_disconnected_player_ids();
+
+        let disconnect_event = EventOut::disconnect_event(disconnect_player_ids);
+
+        connection_handler.clean_disconnected_list();
+
         let players = game_state.all_players();
         for player in players {
             match player.connection_status {
@@ -219,6 +241,16 @@ impl Server {
                         if let Some(ref se) = spawn_event {
                             tracing::info!("Sent : {:?}", se);
                             let packet = se.get_with_event_header(identifier.clone());
+                            socket
+                                .lock()
+                                .await
+                                .send_to(packet.as_slice(), player.addr)
+                                .await
+                                .unwrap();
+                        }
+                        if let Some(ref de) = disconnect_event {
+                            tracing::info!("Sent : {:?}", de);
+                            let packet = de.get_with_event_header(identifier.clone());
                             socket
                                 .lock()
                                 .await

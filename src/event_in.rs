@@ -33,6 +33,7 @@ pub enum EventInType {
     ConnectConfirm = 1,
     Move = 2,
     Rotation = 3,
+    Disconnect = 98,
     Invalid = 99,
 }
 
@@ -47,6 +48,11 @@ pub struct ConnectEvent {
     pub message: String,
 }
 
+#[derive(Debug)]
+pub struct DisconnectEvent {
+    pub message: String,
+}
+
 impl TryFrom<u8> for EventInType {
     type Error = ();
 
@@ -56,6 +62,7 @@ impl TryFrom<u8> for EventInType {
             1 => Ok(EventInType::ConnectConfirm),
             2 => Ok(EventInType::Move),
             3 => Ok(EventInType::Rotation),
+            98 => Ok(EventInType::Disconnect),
             _ => Ok(EventInType::Invalid),
         }
     }
@@ -83,7 +90,7 @@ pub fn digest_move_event(data: Vec<u8>) -> Result<MoveEvent, &'static str> {
 pub fn digest_rotation_event(data: Vec<u8>) -> Result<f32, &'static str> {
     if data.len() < 4 {
         println!("Insufficent bytes: {:?}", data);
-        return Err("Insufficient bytes for MoveInputUpdate");
+        return Err("Insufficient bytes for Rotation");
     }
 
     let rotation_bytes = data[0..4]
@@ -97,10 +104,20 @@ pub fn digest_rotation_event(data: Vec<u8>) -> Result<f32, &'static str> {
 
 pub fn digest_connect_event(data: Vec<u8>) -> Result<ConnectEvent, &'static str> {
     if data.len() < 1 {
-        return Err("Insufficient bytes for MoveInputUpdate");
+        return Err("Insufficient bytes for Connect");
     }
 
     let message = String::from_utf8(data).map_err(|_| "Invalid UTF-8 in player_id")?;
 
     Ok(ConnectEvent { message })
+}
+
+pub fn digest_disconnect_event(data: Vec<u8>) -> Result<DisconnectEvent, &'static str> {
+    if data.len() < 1 {
+        return Err("Insufficient bytes for Disconnect");
+    }
+
+    let message = String::from_utf8(data).map_err(|_| "Invalid UTF-8 in player_id")?;
+
+    Ok(DisconnectEvent { message })
 }
