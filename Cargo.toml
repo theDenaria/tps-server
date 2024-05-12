@@ -12,3 +12,5 @@ bincode = "1.3"
 rand = "0.8"
 tracing = "0.1"
 tracing-subscriber = {version = "0.3", features = ["env-filter"] }
+bytes = "1"
+octets = "0.3.0"
