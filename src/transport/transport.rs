@@ -116,7 +116,6 @@ impl ServerTransport {
                     .generate_payload_packet(client_id.raw(), &packet)
                 {
                     Ok((addr, payload)) => {
-                        tracing::trace!("SOCKET Sent addr: {:?} payload: {:?}", addr, payload);
                         if let Err(e) = self.socket.send_to(payload, addr) {
                             tracing::error!(
                                 "Failed to send packet to client {client_id} ({addr}): {e}"

@@ -15,6 +15,7 @@ pub enum ServerEvent {
     },
     ClientDisconnected {
         client_id: ClientId,
+        player_id: String,
         reason: DisconnectReason,
     },
 }
@@ -111,6 +112,7 @@ impl MattaServer {
     }
 
     pub fn player_id(&self, client_id: ClientId) -> Result<&String, ClientNotFound> {
+        tracing::trace!("TYING TO GET PLAYERID");
         match self.connections.get(&client_id) {
             Some(connection) => Ok(connection.player_id()),
             None => Err(ClientNotFound),
@@ -124,11 +126,15 @@ impl MattaServer {
     /// </p>
     pub fn remove_connection(&mut self, client_id: ClientId) {
         if let Some(connection) = self.connections.remove(&client_id) {
+            let player_id = connection.player_id().clone();
             let reason = connection
                 .disconnect_reason()
                 .unwrap_or(DisconnectReason::Transport);
-            self.events
-                .push_back(ServerEvent::ClientDisconnected { client_id, reason });
+            self.events.push_back(ServerEvent::ClientDisconnected {
+                client_id,
+                player_id,
+                reason,
+            });
         }
     }
 

@@ -25,7 +25,6 @@ pub enum EventInType {
     Connect = 0,
     Move = 2,
     Rotation = 3,
-    Disconnect = 98,
     Invalid = 99,
 }
 
@@ -53,7 +52,6 @@ impl TryFrom<u8> for EventInType {
             0 => Ok(EventInType::Connect),
             2 => Ok(EventInType::Move),
             3 => Ok(EventInType::Rotation),
-            98 => Ok(EventInType::Disconnect),
             _ => Ok(EventInType::Invalid),
         }
     }
@@ -101,14 +99,4 @@ pub fn digest_connect_event(data: Vec<u8>) -> Result<ConnectEvent, &'static str>
     let message = String::from_utf8(data).map_err(|_| "Invalid UTF-8 in player_id")?;
 
     Ok(ConnectEvent { message })
-}
-
-pub fn digest_disconnect_event(data: Vec<u8>) -> Result<DisconnectEvent, &'static str> {
-    if data.len() < 1 {
-        return Err("Insufficient bytes for Disconnect");
-    }
-
-    let message = String::from_utf8(data).map_err(|_| "Invalid UTF-8 in player_id")?;
-
-    Ok(DisconnectEvent { message })
 }

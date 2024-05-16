@@ -23,9 +23,7 @@ use std::{
 use crate::{
     channel::DefaultChannel,
     connection::ConnectionConfig,
-    event_in::{
-        digest_disconnect_event, digest_move_event, digest_rotation_event, EventIn, EventInType,
-    },
+    event_in::{digest_move_event, digest_rotation_event, EventIn, EventInType},
     event_out::EventOut,
     game_state::GameState,
     packet::Packet,
@@ -79,21 +77,17 @@ fn start_server() -> Result<(), TransportError> {
                 ServerEvent::ClientConnected { client_id } => {
                     println!("Client {client_id} connected");
                 }
-                ServerEvent::ClientDisconnected { client_id, reason } => {
+                ServerEvent::ClientDisconnected {
+                    client_id,
+                    player_id,
+                    reason,
+                } => {
                     println!("Client {client_id} disconnected: {reason}");
-                    match server.player_id(client_id) {
-                        Ok(player_id) => {
-                            game_state.remove_player(player_id);
-
-                            let disconnect_event =
-                                EventOut::disconnect_event(vec![player_id]).unwrap();
-                            server.broadcast_message(
-                                DefaultChannel::ReliableOrdered,
-                                disconnect_event.data,
-                            );
-                        }
-                        Err(_e) => {}
-                    }
+                    game_state.remove_player(&player_id);
+                    let disconnect_event = EventOut::disconnect_event(vec![&player_id]).unwrap();
+                    tracing::trace!("Disconnect event: {:?}", disconnect_event);
+                    server
+                        .broadcast_message(DefaultChannel::ReliableOrdered, disconnect_event.data);
                 }
             }
         }
@@ -109,20 +103,28 @@ fn start_server() -> Result<(), TransportError> {
                 match event_in.event_type {
                     EventInType::Connect => {
                         let player_id = player_id.clone();
-                        let spawned_players = game_state.all_players();
-                        let spawn_players = EventOut::spawn_event(spawned_players).unwrap();
-                        server.send_message(
-                            client_id,
-                            DefaultChannel::ReliableOrdered,
-                            spawn_players.data,
-                        );
+                        match game_state.get_player(&player_id) {
+                            None => {
+                                let spawned_players = game_state.all_players();
+                                if let Some(spawn_players) = EventOut::spawn_event(spawned_players)
+                                {
+                                    server.send_message(
+                                        client_id,
+                                        DefaultChannel::ReliableOrdered,
+                                        spawn_players.data,
+                                    );
+                                }
 
-                        game_state.add_player(&player_id);
-                        let spawn_new_player = EventOut::spawn_event_by_player_id(&player_id);
-                        server.broadcast_message(
-                            DefaultChannel::ReliableOrdered,
-                            spawn_new_player.data,
-                        );
+                                game_state.add_player(&player_id);
+                                let spawn_new_player =
+                                    EventOut::spawn_event_by_player_id(&player_id);
+                                server.broadcast_message(
+                                    DefaultChannel::ReliableOrdered,
+                                    spawn_new_player.data,
+                                );
+                            }
+                            Some(_) => {}
+                        }
                     }
                     EventInType::Rotation => {
                         let rotation = digest_rotation_event(event_in.data).unwrap();
@@ -145,23 +147,10 @@ fn start_server() -> Result<(), TransportError> {
                                 .broadcast_message(DefaultChannel::Unreliable, position_event.data);
                         }
                     }
-                    EventInType::Disconnect => {
-                        let disconnect_event = digest_disconnect_event(event_in.data);
-                        tracing::trace!("Disconnect Message Received: {:?}", disconnect_event);
-                        game_state.remove_player(player_id);
-
-                        let disconnect_event = EventOut::disconnect_event(vec![player_id]).unwrap();
-                        server.broadcast_message(
-                            DefaultChannel::ReliableOrdered,
-                            disconnect_event.data,
-                        );
-                    }
                     EventInType::Invalid => {
                         tracing::error!("Invalied EventInType");
                     }
                 }
-
-                tracing::info!("Received message bytes: {:?}", message);
             }
         }
         // Send packets to clients using the transport layer
