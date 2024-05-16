@@ -5,7 +5,6 @@ use crate::connection_stats::ConnectionStats;
 use crate::error::DisconnectReason;
 use crate::packet::{Packet, Payload};
 use bytes::Bytes;
-use octets::OctetsMut;
 
 use std::collections::{BTreeMap, VecDeque};
 use std::time::{Duration, Instant};
@@ -148,7 +147,7 @@ impl UnityClient {
 
         let mut channel_send_order: Vec<ChannelOrder> = Vec::with_capacity(2);
 
-        channel_send_order.push(ChannelOrder::Unreliable(
+        channel_send_order.push(ChannelOrder::Reliable(
             send_reliable_channel_config.channel_id,
         ));
         channel_send_order.push(ChannelOrder::Unreliable(
@@ -258,8 +257,8 @@ impl UnityClient {
         }
     }
 
-    pub fn player_id(&self) -> String {
-        self.player_id.clone()
+    pub fn player_id(&self) -> &String {
+        &self.player_id
     }
 
     /// Set the client connection status to connecting.
@@ -387,8 +386,7 @@ impl UnityClient {
         }
 
         self.stats.received_packet(packet.len() as u64);
-        let mut octets = octets::Octets::with_slice(packet);
-        let packet = match Packet::from_bytes(&mut octets) {
+        let packet = match Packet::from_bytes(&packet) {
             Err(err) => {
                 self.disconnect_with_reason(DisconnectReason::PacketDeserialization(err));
                 return;
@@ -536,8 +534,7 @@ impl UnityClient {
         let mut serialized_packets = Vec::with_capacity(packets.len());
         let mut bytes_sent: u64 = 0;
         for packet in packets {
-            let mut oct = OctetsMut::with_slice(&mut buffer);
-            let len = match packet.to_bytes(&mut oct) {
+            let len = match packet.to_bytes(&mut buffer) {
                 Err(err) => {
                     self.disconnect_with_reason(DisconnectReason::PacketSerialization(err));
                     return vec![];

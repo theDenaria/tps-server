@@ -1,9 +1,10 @@
-use bytes::Bytes;
-use std::fmt;
-
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use bytes::{Buf, Bytes};
+use std::{
+    fmt::{self},
+    io::{Cursor, Read, Write},
+};
 pub type Payload = Vec<u8>;
-
-enum NetworkEventType {}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Packet {
@@ -44,9 +45,9 @@ impl Packet {
         }
     }
 
-    pub fn to_bytes(&self, b: &mut octets::OctetsMut) -> Result<usize, SerializationError> {
-        let before = b.cap();
-
+    pub fn to_bytes(&self, b: &mut [u8]) -> Result<usize, SerializationError> {
+        let mut writer = Cursor::new(b);
+        let before = writer.remaining();
         match self {
             Packet::SmallReliable {
                 channel_id,
@@ -57,28 +58,28 @@ impl Packet {
                 acked_mask,
                 messages,
             } => {
-                b.put_u8(*channel_id)?;
-                b.put_u16(*packet_type)?;
-                b.put_u16(*packet_process_time)?;
-                b.put_u16(*sequence_id)?;
-                b.put_u16(*acked_seq_id)?;
-                b.put_u32(*acked_mask)?;
-                b.put_u16(messages.len() as u16)?;
+                writer.write_u8(*channel_id)?;
+                writer.write_u16::<LittleEndian>(*packet_type)?;
+                writer.write_u16::<LittleEndian>(*packet_process_time)?;
+                writer.write_u16::<LittleEndian>(*sequence_id)?;
+                writer.write_u16::<LittleEndian>(*acked_seq_id)?;
+                writer.write_u32::<LittleEndian>(*acked_mask)?;
+                writer.write_u16::<LittleEndian>(messages.len() as u16)?;
                 for (message_id, message) in messages {
-                    b.put_varint(*message_id)?;
-                    b.put_varint(message.len() as u64)?;
-                    b.put_bytes(message)?;
+                    writer.write_u64::<LittleEndian>(*message_id)?;
+                    writer.write_u16::<LittleEndian>(message.len() as u16)?;
+                    writer.write_all(message)?;
                 }
             }
             Packet::SmallUnreliable {
                 channel_id,
                 messages,
             } => {
-                b.put_u8(*channel_id)?;
-                b.put_u16(messages.len() as u16)?;
+                writer.write_u8(*channel_id)?;
+                writer.write_u16::<LittleEndian>(messages.len() as u16)?;
                 for message in messages {
-                    b.put_varint(message.len() as u64)?;
-                    b.put_bytes(message)?;
+                    writer.write_u16::<LittleEndian>(message.len() as u16)?;
+                    writer.write_all(message)?;
                 }
             }
             Packet::Ack {
@@ -90,31 +91,32 @@ impl Packet {
                 acked_mask,
                 end_posfix,
             } => {
-                b.put_u8(*channel_id)?;
-                b.put_u16(*packet_type)?;
-                b.put_u16(*packet_process_time)?;
-                b.put_u16(*sequence_id)?;
-                b.put_u16(*acked_seq_id)?;
-                b.put_u32(*acked_mask)?;
-                b.put_u8(*end_posfix)?;
+                writer.write_u8(*channel_id)?;
+                writer.write_u16::<LittleEndian>(*packet_type)?;
+                writer.write_u16::<LittleEndian>(*packet_process_time)?;
+                writer.write_u16::<LittleEndian>(*sequence_id)?;
+                writer.write_u16::<LittleEndian>(*acked_seq_id)?;
+                writer.write_u32::<LittleEndian>(*acked_mask)?;
+                writer.write_u8(*end_posfix)?;
             }
         }
 
-        Ok(before - b.cap())
+        Ok(before - writer.remaining())
     }
 
-    pub fn from_bytes(b: &mut octets::Octets) -> Result<Packet, SerializationError> {
-        // let packet_type = b.get_u8()?;
-        let channel_id = b.get_u8()?;
-
+    pub fn from_bytes(b: &[u8]) -> Result<Packet, SerializationError> {
+        let mut reader = Cursor::new(b);
+        let channel_id = reader.read_u8()?;
         let mut messages: Vec<Bytes> = Vec::with_capacity(64);
         match channel_id {
             0 => {
                 // SmallUnreliable
-                let messages_len = b.get_u16()?;
+                let messages_len = reader.read_u16::<LittleEndian>()?;
                 for _ in 0..messages_len {
-                    let payload = b.get_bytes_with_varint_length()?;
-                    messages.push(payload.to_vec().into());
+                    let message_len = reader.read_u16::<LittleEndian>()?;
+                    let mut data = vec![0u8; message_len as usize];
+                    reader.read_exact(&mut data)?;
+                    messages.push(data.into());
                 }
                 Ok(Packet::SmallUnreliable {
                     channel_id,
@@ -123,21 +125,23 @@ impl Packet {
             }
 
             1 => {
-                let packet_type = b.get_u16()?;
-                let packet_process_time = b.get_u16()?;
-                let sequence_id = b.get_u16()?;
-                let acked_seq_id = b.get_u16()?;
-                let acked_mask = b.get_u32()?;
+                let packet_type = reader.read_u16::<LittleEndian>()?;
+                let packet_process_time = reader.read_u16::<LittleEndian>()?;
+                let sequence_id = reader.read_u16::<LittleEndian>()?;
+                let acked_seq_id = reader.read_u16::<LittleEndian>()?;
+                let acked_mask = reader.read_u32::<LittleEndian>()?;
                 match packet_type {
                     0 => {
                         // SmallReliable Payload
-                        let messages_len = b.get_u16()?;
+                        let messages_len = reader.read_u16::<LittleEndian>()?;
                         let mut messages: Vec<(u64, Bytes)> = Vec::with_capacity(64);
                         for _ in 0..messages_len {
-                            let message_id = b.get_varint()?;
-                            let payload = b.get_bytes_with_varint_length()?;
+                            let message_id = reader.read_u64::<LittleEndian>()?;
+                            let message_len = reader.read_u16::<LittleEndian>()?;
+                            let mut data = vec![0u8; message_len as usize];
+                            reader.read_exact(&mut data)?;
 
-                            messages.push((message_id, payload.to_vec().into()));
+                            messages.push((message_id, data.into()));
                         }
                         Ok(Packet::SmallReliable {
                             channel_id,
@@ -151,7 +155,7 @@ impl Packet {
                     }
                     1 => {
                         // SmallReliable Ack
-                        let end_posfix = b.get_u8()?;
+                        let end_posfix = reader.read_u8()?;
                         Ok(Packet::Ack {
                             channel_id,
                             packet_type,
@@ -177,6 +181,7 @@ pub enum SerializationError {
     InvalidAckRange,
     InvalidPacketType,
     InvalidChannelId,
+    CursorReadError,
 }
 
 impl std::error::Error for SerializationError {}
@@ -191,12 +196,14 @@ impl fmt::Display for SerializationError {
             InvalidAckRange => write!(fmt, "invalid ack range"),
             InvalidPacketType => write!(fmt, "invalid packet type"),
             InvalidChannelId => write!(fmt, "invalid channel id"),
+            CursorReadError => write!(fmt, "cursor read error"),
         }
     }
 }
 
-impl From<octets::BufferTooShortError> for SerializationError {
-    fn from(_: octets::BufferTooShortError) -> Self {
-        SerializationError::BufferTooShort
+impl From<std::io::Error> for SerializationError {
+    fn from(error: std::io::Error) -> Self {
+        tracing::error!("IN ERROR FROM: {:?}", error);
+        SerializationError::CursorReadError
     }
 }

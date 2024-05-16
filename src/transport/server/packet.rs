@@ -148,15 +148,9 @@ impl<'a> Packet<'a> {
     }
 
     pub fn decode(buffer: &'a mut [u8]) -> Result<Self, TransportServerError> {
-        tracing::info!("Tring to decode");
         let packet_type = buffer[0];
         let packet_type = PacketType::from_u8(packet_type)?;
-
-        tracing::info!("got package type: {:?}", packet_type);
-
         let packet = Packet::read(packet_type, &buffer[1..])?;
-
-        tracing::info!("decoded packet : {:?}", packet);
         Ok(packet)
     }
 }

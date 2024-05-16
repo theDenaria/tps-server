@@ -131,7 +131,6 @@ impl SendChannelReliable {
             });
             self.next_package_sequence_id += 1;
         }
-
         packets
     }
 
@@ -155,6 +154,7 @@ impl SendChannelReliable {
 
     pub fn process_message_ack(&mut self, message_id: u64) {
         if self.unacked_messages.contains_key(&message_id) {
+            tracing::trace!("MESSAGE ID: {:?} IS ACKEDD!!!", message_id);
             let unacked_message = self.unacked_messages.remove(&message_id).unwrap();
             let UnackedMessage::Small {
                 message: payload, ..

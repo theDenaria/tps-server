@@ -110,6 +110,13 @@ impl MattaServer {
         }
     }
 
+    pub fn player_id(&self, client_id: ClientId) -> Result<&String, ClientNotFound> {
+        match self.connections.get(&client_id) {
+            Some(connection) => Ok(connection.player_id()),
+            None => Err(ClientNotFound),
+        }
+    }
+
     /// Removes a connection from the server, emits an disconnect server event.
     /// It does nothing if the client does not exits.
     /// <p style="background:rgba(77,220,255,0.16);padding:0.5em;">
@@ -211,9 +218,11 @@ impl MattaServer {
         &mut self,
         client_id: ClientId,
         channel_id: I,
-    ) -> Option<Bytes> {
+    ) -> Option<(Bytes, &String)> {
         if let Some(connection) = self.connections.get_mut(&client_id) {
-            return connection.receive_message(channel_id);
+            if let Some(message) = connection.receive_message(channel_id) {
+                return Some((message, connection.player_id()));
+            }
         }
         None
     }

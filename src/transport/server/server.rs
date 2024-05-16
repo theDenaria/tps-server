@@ -5,7 +5,7 @@ use crate::{
         TRANSPORT_MAX_CLIENTS, TRANSPORT_MAX_PACKET_BYTES, TRANSPORT_MAX_PENDING_CLIENTS,
         TRANSPORT_SEND_RATE,
     },
-    transport::{error::TransportError, server::packet::Packet},
+    transport::server::packet::Packet,
 };
 
 use super::error::TransportServerError;
@@ -248,12 +248,6 @@ impl TransportServer {
         // Handle connected client
         if let Some((slot, client)) = find_client_mut_by_addr(&mut self.clients, addr) {
             let packet = Packet::decode(buffer)?;
-            tracing::info!("Processing internal package: {:?}", packet);
-            tracing::trace!(
-                "Received packet from connected client ({}): {:?}",
-                client.client_id,
-                packet.packet_type()
-            );
 
             client.last_packet_received_time = self.current_time;
             match client.state {
@@ -329,16 +323,18 @@ impl TransportServer {
                 } => {
                     let bytes = payload.to_vec();
                     let channel_id = bytes[0];
-                    let message_type = bytes[1];
+                    let messages_len = bytes[1];
+                    let message_type = bytes[5];
 
-                    if bytes.len() < 17 || channel_id != 0 || message_type != 0 {
+                    if bytes.len() < 17 || channel_id != 0 || messages_len != 1 || message_type != 0
+                    {
                         return Err(TransportServerError::InvalidPacketType);
                     }
 
-                    let (player_id_bytes, _data) = bytes[2..].split_at(17);
+                    let (player_id_bytes, _data) = bytes[6..].split_at(16);
 
                     let player_id = String::from_utf8(player_id_bytes.to_vec())
-                        .map_err(|_| TransportServerError::InvalidPacketType)?
+                        .map_err(|_| TransportServerError::InvalidPlayerId)?
                         .trim_end_matches(char::from(0))
                         .to_string();
 

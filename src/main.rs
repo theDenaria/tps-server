@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use std::io;
 mod channel;
 mod connection;
@@ -11,6 +12,7 @@ mod packet;
 mod server;
 mod transport;
 
+use bytes::Bytes;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 use std::{
@@ -21,9 +23,13 @@ use std::{
 use crate::{
     channel::DefaultChannel,
     connection::ConnectionConfig,
-    event_in::{EventIn, EventInType},
+    event_in::{
+        digest_disconnect_event, digest_move_event, digest_rotation_event, EventIn, EventInType,
+    },
     event_out::EventOut,
-    server::{ClientId, MattaServer, ServerEvent},
+    game_state::GameState,
+    packet::Packet,
+    server::{MattaServer, ServerEvent},
     transport::{error::TransportError, server::server::ServerConfig, transport::ServerTransport},
 };
 
@@ -58,6 +64,8 @@ fn start_server() -> Result<(), TransportError> {
     };
     let mut transport = ServerTransport::new(server_config, socket).unwrap();
 
+    let mut game_state = GameState::new();
+
     // Your gameplay loop
     loop {
         let delta_time = Duration::from_millis(16);
@@ -73,6 +81,19 @@ fn start_server() -> Result<(), TransportError> {
                 }
                 ServerEvent::ClientDisconnected { client_id, reason } => {
                     println!("Client {client_id} disconnected: {reason}");
+                    match server.player_id(client_id) {
+                        Ok(player_id) => {
+                            game_state.remove_player(player_id);
+
+                            let disconnect_event =
+                                EventOut::disconnect_event(vec![player_id]).unwrap();
+                            server.broadcast_message(
+                                DefaultChannel::ReliableOrdered,
+                                disconnect_event.data,
+                            );
+                        }
+                        Err(_e) => {}
+                    }
                 }
             }
         }
@@ -80,42 +101,107 @@ fn start_server() -> Result<(), TransportError> {
         // Receive message from channel
         for client_id in server.clients_id() {
             // The enum DefaultChannel describe the channels used by the default configuration
-            while let Some(message) =
-                server.receive_message(client_id, DefaultChannel::ReliableOrdered)
+            while let Some((message, player_id)) =
+                server.receive_message(client_id, DefaultChannel::Unreliable)
             {
                 let event_in = EventIn::new(message.to_vec()).unwrap();
 
                 match event_in.event_type {
                     EventInType::Connect => {
-                        tracing::trace!("Connect EVENT Received!");
-                        let event_out = EventOut::spawn_event_by_player_id(event_in.player_id);
-                        server.broadcast_message(DefaultChannel::ReliableOrdered, event_out.data);
-                        tracing::trace!("Spawn event broadcasted!");
+                        let player_id = player_id.clone();
+                        let spawned_players = game_state.all_players();
+                        let spawn_players = EventOut::spawn_event(spawned_players).unwrap();
+                        server.send_message(
+                            client_id,
+                            DefaultChannel::ReliableOrdered,
+                            spawn_players.data,
+                        );
+
+                        game_state.add_player(&player_id);
+                        let spawn_new_player = EventOut::spawn_event_by_player_id(&player_id);
+                        server.broadcast_message(
+                            DefaultChannel::ReliableOrdered,
+                            spawn_new_player.data,
+                        );
                     }
-                    _ => {}
+                    EventInType::Rotation => {
+                        let rotation = digest_rotation_event(event_in.data).unwrap();
+                        if let Some(player) = game_state.get_player_mut(player_id) {
+                            player.update_rotation(rotation);
+                            let position_event = EventOut::position_event(vec![player]).unwrap();
+                            server
+                                .broadcast_message(DefaultChannel::Unreliable, position_event.data);
+                        }
+
+                        tracing::trace!("Rotation Message Received: {:?}", rotation);
+                    }
+                    EventInType::Move => {
+                        let move_event = digest_move_event(event_in.data).unwrap();
+                        tracing::trace!("Rotation Message Received: {:?}", move_event);
+                        if let Some(player) = game_state.get_player_mut(player_id) {
+                            player.update_position(move_event);
+                            let position_event = EventOut::position_event(vec![player]).unwrap();
+                            server
+                                .broadcast_message(DefaultChannel::Unreliable, position_event.data);
+                        }
+                    }
+                    EventInType::Disconnect => {
+                        let disconnect_event = digest_disconnect_event(event_in.data);
+                        tracing::trace!("Disconnect Message Received: {:?}", disconnect_event);
+                        game_state.remove_player(player_id);
+
+                        let disconnect_event = EventOut::disconnect_event(vec![player_id]).unwrap();
+                        server.broadcast_message(
+                            DefaultChannel::ReliableOrdered,
+                            disconnect_event.data,
+                        );
+                    }
+                    EventInType::Invalid => {
+                        tracing::error!("Invalied EventInType");
+                    }
                 }
 
                 tracing::info!("Received message bytes: {:?}", message);
             }
         }
-
-        // Send a text message for all clients
-        server.broadcast_message(DefaultChannel::ReliableOrdered, "server message");
-
-        let client_id = ClientId::from_raw(0);
-        // Send a text message for all clients except for Client 0
-        server.broadcast_message_except(
-            client_id,
-            DefaultChannel::ReliableOrdered,
-            "server message",
-        );
-
-        // Send message to only one client
-        // server.send_message(client_id, DefaultChannel::ReliableOrdered, "server message");
-
         // Send packets to clients using the transport layer
         transport.send_packets(&mut server);
 
         std::thread::sleep(delta_time); // Running at 60hz
     }
+}
+
+fn run_tests() {
+    let event_out = EventOut::spawn_event_by_player_id(&String::from("player1"));
+
+    tracing::trace!("Event Data : {:?}", event_out);
+
+    let messages = vec![Bytes::from(event_out.data)];
+
+    let sample = Packet::SmallUnreliable {
+        channel_id: 0,
+        messages: messages.clone(),
+    };
+
+    let sample_reliable = Packet::SmallReliable {
+        channel_id: 1,
+        packet_type: 0,
+        packet_process_time: 0,
+        sequence_id: 1,
+        acked_seq_id: u16::MAX,
+        acked_mask: 0,
+        messages: vec![(0, messages[0].clone()), (1, messages[0].clone())],
+    };
+
+    let mut buffer = [0u8; 1400];
+
+    let len = sample_reliable.to_bytes(&mut buffer).unwrap();
+
+    tracing::trace!("SAMPLE PACKET: {:?}", sample_reliable);
+    tracing::trace!("SAMPLE PACKET to bytes: {:?}", &buffer[..len]);
+
+    let len = sample.to_bytes(&mut buffer).unwrap();
+
+    tracing::trace!("SAMPLE PACKET: {:?}", sample);
+    tracing::trace!("SAMPLE PACKET to bytes: {:?}", &buffer[..len]);
 }

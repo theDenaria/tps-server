@@ -6,6 +6,8 @@ use crate::{constants::TRANSPORT_MAX_PAYLOAD_BYTES, error::DisconnectReason};
 pub enum TransportServerError {
     /// The type of the packet is invalid.
     InvalidPacketType,
+    /// Invalid player id in connect packet
+    InvalidPlayerId,
     /// Packet size is too small to be a netcode packet.
     PacketTooSmall,
     /// Payload is above the maximum limit
@@ -34,6 +36,7 @@ impl fmt::Display for TransportServerError {
 
         match *self {
             InvalidPacketType => write!(fmt, "invalid packet type"),
+            InvalidPlayerId => write!(fmt, "invalid player_id bytes to deserialize"),
             PacketTooSmall => write!(fmt, "packet is too small"),
             PayloadAboveLimit => write!(
                 fmt,
