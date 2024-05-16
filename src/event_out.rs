@@ -20,7 +20,7 @@ impl EventOut {
         with_header
     }
 
-    pub fn position_event(players: Vec<&mut Player>) -> Option<EventOut> {
+    pub fn position_event(players: Vec<&Player>) -> Option<EventOut> {
         let player_num = players.len() as u32;
         if player_num < 1 {
             return None;
@@ -35,7 +35,6 @@ impl EventOut {
                     y: player.position.y,
                     rotation: player.rotation,
                 });
-                player.set_position_updated(false);
             }
         }
         if positions.len() > 0 {
@@ -80,7 +79,30 @@ impl EventOut {
             data: serialized,
         })
     }
-    pub fn disconnect_event(player_ids: Vec<String>) -> Option<EventOut> {
+
+    pub fn spawn_event_by_player_id(player_id: &String) -> EventOut {
+        let mut positions: Vec<Position> = vec![];
+
+        let player_id_bytes = normalize_player_id(player_id.as_str());
+        positions.push(Position {
+            player_id: player_id_bytes,
+            x: 10.0,
+            y: 10.0,
+            rotation: 0.0,
+        });
+
+        let spawn_event = PositionEvent { positions };
+
+        let mut serialized = bincode::serialize(&spawn_event).unwrap();
+
+        serialized.insert(0, 0); // Spawn Event Type 0
+
+        EventOut {
+            event_type: EventOutType::Spawn,
+            data: serialized,
+        }
+    }
+    pub fn disconnect_event(player_ids: Vec<&String>) -> Option<EventOut> {
         let player_num = player_ids.len() as u32;
         if player_num < 1 {
             return None;

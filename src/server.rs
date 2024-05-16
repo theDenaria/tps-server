@@ -1,320 +1,350 @@
-use std::net::SocketAddr;
-use std::sync::Arc;
-use std::thread;
-use std::time::{Duration, Instant};
-use tokio::net::UdpSocket;
-use tokio::sync::mpsc::Sender;
-use tokio::sync::{mpsc, Mutex};
+use crate::connection::{ConnectionConfig, NetworkInfo, UnityClient};
+use crate::error::{ClientNotFound, DisconnectReason};
+use crate::packet::Payload;
+use std::collections::{HashMap, VecDeque};
+use std::time::Duration;
 
-use crate::connection_handler::ConnectionHandler;
-use crate::event_in::{
-    digest_connect_event, digest_disconnect_event, digest_move_event, digest_rotation_event,
-    EventIn, EventInType,
-};
-use crate::event_out::EventOut;
-use crate::game_state::{ConnectionStatus, GameState, Player};
-use crate::packet::{MessageType, Packet};
+use bytes::Bytes;
 
-pub struct Server {
-    tick_rate: f32,
-    socket: Arc<Mutex<UdpSocket>>,
-    game_state: Arc<Mutex<GameState>>,
-    connection_handler: Arc<Mutex<ConnectionHandler>>,
+/// Connection and disconnection events in the server.
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "bevy", derive(bevy_ecs::prelude::Event))]
+pub enum ServerEvent {
+    ClientConnected {
+        client_id: ClientId,
+    },
+    ClientDisconnected {
+        client_id: ClientId,
+        reason: DisconnectReason,
+    },
 }
 
-impl Server {
-    pub async fn new(options: Option<ServerOptions>) -> Server {
-        let options = options.unwrap_or(ServerOptions { tick_rate: 60.0 });
-        let socket = UdpSocket::bind("0.0.0.0:5000").await.unwrap();
-        Server {
-            tick_rate: options.tick_rate,
-            game_state: Arc::new(Mutex::new(GameState::new())),
-            socket: Arc::new(Mutex::new(socket)),
-            connection_handler: Arc::new(Mutex::new(ConnectionHandler::new())),
+#[derive(Debug)]
+pub struct MattaServer {
+    connections: HashMap<ClientId, UnityClient>,
+    connection_config: ConnectionConfig,
+    events: VecDeque<ServerEvent>,
+}
+
+impl MattaServer {
+    pub fn new(connection_config: ConnectionConfig) -> Self {
+        Self {
+            connections: HashMap::new(),
+            connection_config,
+            events: VecDeque::new(),
         }
     }
 
-    pub async fn start(self: Arc<Self>) {
-        let (tx, mut rx) = mpsc::channel(100);
+    /// Adds a new connection to the server. If a connection already exits it does nothing.
+    /// <p style="background:rgba(77,220,255,0.16);padding:0.5em;">
+    /// <strong>Note:</strong> This should only be called by the transport layer.
+    /// </p>
+    pub fn add_connection(&mut self, client_id: ClientId, player_id: String) {
+        if self.connections.contains_key(&client_id) {
+            return;
+        }
 
-        let self_clone = self.clone();
-
-        self_clone.run_receiver(tx).await;
-
-        // Main game loop in a separate thread
-        thread::spawn(move || {
-            let tick_duration = Duration::from_secs_f64(1.0 / self.tick_rate as f64);
-            let mut next_tick = Instant::now() + tick_duration;
-            loop {
-                let start_time = Instant::now();
-
-                // Process all available messages
-                while let Ok((message, addr)) = rx.try_recv() {
-                    if message.len() > 8 {
-                        let self_clone = self.clone();
-                        tokio::runtime::Runtime::new().unwrap().block_on(async {
-                            self_clone.process_client_messages(message, addr).await;
-                        });
-                    }
-                }
-
-                // Update game logic
-                let self_clone = self.clone();
-                tokio::runtime::Runtime::new().unwrap().block_on(async {
-                    self_clone.send_game_state_updates().await;
-                });
-
-                // Calculate the remaining time until the next tick
-                let elapsed = Instant::now().duration_since(start_time);
-                if elapsed < tick_duration {
-                    next_tick += tick_duration;
-                    let sleep_duration = next_tick - Instant::now();
-                    if sleep_duration > Duration::from_millis(0) {
-                        thread::sleep(sleep_duration);
-                    }
-                } else {
-                    // We're running behind, skip to the next tick
-                    next_tick = Instant::now() + tick_duration;
-                }
-            }
-        })
-        .join()
-        .unwrap();
+        let mut connection = UnityClient::new_from_server(self.connection_config.clone());
+        // Consider newly added connections as connected
+        connection.set_connected(player_id);
+        self.connections.insert(client_id, connection);
+        self.events
+            .push_back(ServerEvent::ClientConnected { client_id })
     }
 
-    async fn process_client_messages(&self, message: Vec<u8>, addr: SocketAddr) {
-        let packet = Packet::new(message);
-        let socket = self.socket.clone();
-        let game_state = self.game_state.clone();
-        let mut connection_handler = self.connection_handler.lock().await;
-        let packet_identifier = packet.get_message_header().clone();
-        connection_handler.set_last_message_time(packet_identifier.clone());
+    pub fn get_event(&mut self) -> Option<ServerEvent> {
+        self.events.pop_front()
+    }
 
-        match packet.message_type {
-            MessageType::Event => {
-                let payload = packet.get_event_payload();
-                let event = EventIn::new(payload).unwrap();
-                tracing::info!("Received: {:?}", event);
-                match event.event_type {
-                    EventInType::Rotation => {
-                        let rotation_input = digest_rotation_event(event.data).unwrap();
-                        let mut game_state = game_state.lock().await;
-                        if let Some(player) = game_state.get_player_mut(event.player_id) {
-                            player.update_rotation(rotation_input);
-                        }
-                    }
-                    EventInType::Move => {
-                        let move_input = digest_move_event(event.data).unwrap();
-                        let mut game_state = game_state.lock().await;
-                        if let Some(player) = game_state.get_player_mut(event.player_id) {
-                            player.update_position(move_input);
-                        }
-                    }
-                    EventInType::Connect => {
-                        let _connect_event = digest_connect_event(event.data).unwrap();
-                        let player_id = event.player_id;
+    /// Returns whether or not the server has connections
+    pub fn has_connections(&self) -> bool {
+        !self.connections.is_empty()
+    }
 
-                        let is_new =
-                            connection_handler.new_connection(&player_id, packet_identifier);
+    /// Returns the disconnection reason for the client if its disconnected
+    pub fn disconnect_reason(&self, client_id: ClientId) -> Option<DisconnectReason> {
+        if let Some(connection) = self.connections.get(&client_id) {
+            return connection.disconnect_reason();
+        }
 
-                        // This means already added this player
-                        let mut game_state = game_state.lock().await;
-                        if is_new {
-                            game_state.add_player(addr, player_id);
-                        }
-                    }
-                    EventInType::ConnectConfirm => {
-                        let _connect_event = digest_connect_event(event.data).unwrap();
-                        let player_id = event.player_id;
+        None
+    }
 
-                        // This means already added this player
-                        let mut game_state = game_state.lock().await;
-                        match game_state.get_player_mut(player_id) {
-                            Some(player) => {
-                                player.set_connected();
-                            }
-                            None => {
-                                panic!("No player found for Connect Confirm");
-                            }
-                        }
-                    }
-                    EventInType::Disconnect => {
-                        let disconnect_event = digest_disconnect_event(event.data).unwrap();
-
-                        if let Some(player_id) =
-                            connection_handler.get_connected_player_id(packet_identifier)
-                        {
-                            let mut game_state = game_state.lock().await;
-                            game_state.remove_player(player_id.clone());
-                            connection_handler.set_disconnected(&player_id);
-                        }
-                    }
-                    EventInType::Invalid => {}
-                }
-            }
-            MessageType::Connect => {
-                socket
-                    .lock()
-                    .await
-                    .send_to(packet.get_connect_ack_raw().as_slice(), addr)
-                    .await
-                    .unwrap();
-                tracing::info!("{:?} Connect ack bytes sent", packet.get_connect_ack_raw());
-            }
-            MessageType::KeepAlive => {
-                socket
-                    .lock()
-                    .await
-                    .send_to(packet.raw.as_slice(), addr)
-                    .await
-                    .unwrap();
-            }
-            MessageType::Disconnect => {
-                tracing::info!("DISCONNECT PACKET: {:?}", packet);
-            }
-            MessageType::Other => {
-                tracing::info!("OTHER PACKET: {:?}", packet);
-            }
+    /// Returns the round-time trip for the client or 0.0 if the client is not found
+    pub fn rtt(&self, client_id: ClientId) -> f64 {
+        match self.connections.get(&client_id) {
+            Some(connection) => connection.rtt(),
+            None => 0.0,
         }
     }
 
-    async fn send_game_state_updates(&self) {
-        let socket = self.socket.clone();
-        let mut game_state = self.game_state.lock().await;
-        let mut connection_handler = self.connection_handler.lock().await;
-
-        let timed_out_players = connection_handler.check_timeout();
-
-        for player_id in timed_out_players {
-            game_state.remove_player(player_id.clone());
-        }
-
-        let all_players_mut = game_state.all_players_mut();
-
-        let position_event = EventOut::position_event(all_players_mut);
-
-        let pending_players_connection = connection_handler.get_pending_connections();
-        let mut pending_players: Vec<&Player> = vec![];
-
-        for connection in pending_players_connection {
-            match game_state.get_player(connection.player_id.clone()) {
-                Some(pl) => pending_players.push(pl),
-                None => {}
-            }
-        }
-
-        let connected_players_connection = connection_handler.get_connected_connections();
-        let mut connected_players: Vec<&Player> = vec![];
-
-        for connection in connected_players_connection {
-            match game_state.get_player(connection.player_id.clone()) {
-                Some(pl) => connected_players.push(pl),
-                None => {}
-            }
-        }
-
-        let spawn_event = EventOut::spawn_event(pending_players);
-
-        let disconnect_player_ids = connection_handler.get_disconnected_player_ids();
-
-        let disconnect_event = EventOut::disconnect_event(disconnect_player_ids);
-
-        connection_handler.clean_disconnected_list();
-
-        let players = game_state.all_players();
-        for player in players {
-            match player.connection_status {
-                ConnectionStatus::Connected => {
-                    let maybe_identifier = connection_handler.get_connected_identifier(&player.id);
-
-                    if let Some(identifier) = maybe_identifier {
-                        if let Some(ref pe) = position_event {
-                            let packet = pe.get_with_event_header(identifier.clone());
-                            tracing::info!("Sent: {:?}", pe);
-                            socket
-                                .lock()
-                                .await
-                                .send_to(packet.as_slice(), player.addr)
-                                .await
-                                .unwrap();
-                        }
-                        if let Some(ref se) = spawn_event {
-                            tracing::info!("Sent : {:?}", se);
-                            let packet = se.get_with_event_header(identifier.clone());
-                            socket
-                                .lock()
-                                .await
-                                .send_to(packet.as_slice(), player.addr)
-                                .await
-                                .unwrap();
-                        }
-                        if let Some(ref de) = disconnect_event {
-                            tracing::info!("Sent : {:?}", de);
-                            let packet = de.get_with_event_header(identifier.clone());
-                            socket
-                                .lock()
-                                .await
-                                .send_to(packet.as_slice(), player.addr)
-                                .await
-                                .unwrap();
-                        }
-                    }
-                }
-                ConnectionStatus::Connecting => {
-                    let maybe_identifier = connection_handler.get_pending_identifier(&player.id);
-                    if let Some(identifier) = maybe_identifier {
-                        let spawn_event_connected_player =
-                            EventOut::spawn_event(connected_players.clone());
-
-                        if let Some(con_se) = spawn_event_connected_player {
-                            tracing::info!("Sent : {:?}", con_se);
-                            let packet = con_se.get_with_event_header(identifier.clone());
-                            socket
-                                .lock()
-                                .await
-                                .send_to(packet.as_slice(), player.addr)
-                                .await
-                                .unwrap();
-                        }
-
-                        if let Some(ref se) = spawn_event {
-                            tracing::info!("Sent : {:?}", se);
-                            let packet = se.get_with_event_header(identifier.clone());
-                            socket
-                                .lock()
-                                .await
-                                .send_to(packet.as_slice(), player.addr)
-                                .await
-                                .unwrap();
-                        }
-                        connection_handler.set_connected(&player.id);
-                    }
-                } //TODO ConnectionStatus::Disconnected => {}
-            }
+    /// Returns the packet loss for the client or 0.0 if the client is not found
+    pub fn packet_loss(&self, client_id: ClientId) -> f64 {
+        match self.connections.get(&client_id) {
+            Some(connection) => connection.packet_loss(),
+            None => 0.0,
         }
     }
 
-    pub async fn run_receiver(self: Arc<Self>, tx: Sender<(Vec<u8>, SocketAddr)>) {
-        // Clone `self` for the asynchronous task to listen for UDP messages
-        let self_clone = self.clone();
-        tokio::spawn(async move {
-            let socket = self_clone.socket.clone();
-            let mut buf = vec![0u8; 1024];
-            loop {
-                // Scoping the lock so it gets dropped before the await
-                let (len, addr) = {
-                    let socket_lock = socket.lock().await;
-                    socket_lock.recv_from(&mut buf).await.unwrap()
-                }; // The lock is released here because the scope ends
+    /// Returns the bytes sent per seconds for the client or 0.0 if the client is not found
+    pub fn bytes_sent_per_sec(&self, client_id: ClientId) -> f64 {
+        match self.connections.get(&client_id) {
+            Some(connection) => connection.bytes_sent_per_sec(),
+            None => 0.0,
+        }
+    }
 
-                let msg = buf[..len].to_vec();
-                tx.send((msg, addr)).await.unwrap(); // Send message to game logic
-                tokio::time::sleep(Duration::from_millis(1)).await;
+    /// Returns the bytes received per seconds for the client or 0.0 if the client is not found
+    pub fn bytes_received_per_sec(&self, client_id: ClientId) -> f64 {
+        match self.connections.get(&client_id) {
+            Some(connection) => connection.bytes_received_per_sec(),
+            None => 0.0,
+        }
+    }
+
+    /// Returns all network informations for the client
+    pub fn network_info(&self, client_id: ClientId) -> Result<NetworkInfo, ClientNotFound> {
+        match self.connections.get(&client_id) {
+            Some(connection) => Ok(connection.network_info()),
+            None => Err(ClientNotFound),
+        }
+    }
+
+    pub fn player_id(&self, client_id: ClientId) -> Result<&String, ClientNotFound> {
+        match self.connections.get(&client_id) {
+            Some(connection) => Ok(connection.player_id()),
+            None => Err(ClientNotFound),
+        }
+    }
+
+    /// Removes a connection from the server, emits an disconnect server event.
+    /// It does nothing if the client does not exits.
+    /// <p style="background:rgba(77,220,255,0.16);padding:0.5em;">
+    /// <strong>Note:</strong> This should only be called by the transport layer.
+    /// </p>
+    pub fn remove_connection(&mut self, client_id: ClientId) {
+        if let Some(connection) = self.connections.remove(&client_id) {
+            let reason = connection
+                .disconnect_reason()
+                .unwrap_or(DisconnectReason::Transport);
+            self.events
+                .push_back(ServerEvent::ClientDisconnected { client_id, reason });
+        }
+    }
+
+    /// Disconnects a client, it does nothing if the client does not exist.
+    pub fn disconnect(&mut self, client_id: ClientId) {
+        if let Some(connection) = self.connections.get_mut(&client_id) {
+            connection.disconnect_with_reason(DisconnectReason::DisconnectedByServer)
+        }
+    }
+
+    /// Disconnects all client.
+    pub fn disconnect_all(&mut self) {
+        for connection in self.connections.values_mut() {
+            connection.disconnect_with_reason(DisconnectReason::DisconnectedByServer)
+        }
+    }
+
+    /// Send a message to all clients over a channel.
+    pub fn broadcast_message<I: Into<u8>, B: Into<Bytes>>(&mut self, channel_id: I, message: B) {
+        let channel_id = channel_id.into();
+        let message = message.into();
+        for connection in self.connections.values_mut() {
+            connection.send_message(channel_id, message.clone());
+        }
+    }
+
+    /// Send a message to all clients, except the specified one, over a channel.
+    pub fn broadcast_message_except<I: Into<u8>, B: Into<Bytes>>(
+        &mut self,
+        except_id: ClientId,
+        channel_id: I,
+        message: B,
+    ) {
+        let channel_id = channel_id.into();
+        let message = message.into();
+        for (connection_id, connection) in self.connections.iter_mut() {
+            if except_id == *connection_id {
+                continue;
             }
-        });
+
+            connection.send_message(channel_id, message.clone());
+        }
+    }
+
+    /// Returns the available memory in bytes of a channel for the given client.
+    /// Returns 0 if the client is not found.
+    pub fn channel_available_memory<I: Into<u8>>(
+        &self,
+        client_id: ClientId,
+        channel_id: I,
+    ) -> usize {
+        match self.connections.get(&client_id) {
+            Some(connection) => connection.channel_available_memory(channel_id),
+            None => 0,
+        }
+    }
+
+    /// Checks if can send a message with the given size in bytes over a channel for the given client.
+    /// Returns false if the client is not found.
+    pub fn can_send_message<I: Into<u8>>(
+        &self,
+        client_id: ClientId,
+        channel_id: I,
+        size_bytes: usize,
+    ) -> bool {
+        match self.connections.get(&client_id) {
+            Some(connection) => connection.can_send_message(channel_id, size_bytes),
+            None => false,
+        }
+    }
+
+    /// Send a message to a client over a channel.
+    pub fn send_message<I: Into<u8>, B: Into<Bytes>>(
+        &mut self,
+        client_id: ClientId,
+        channel_id: I,
+        message: B,
+    ) {
+        match self.connections.get_mut(&client_id) {
+            Some(connection) => connection.send_message(channel_id, message),
+            None => tracing::error!("Tried to send a message to invalid client {:?}", client_id),
+        }
+    }
+
+    /// Receive a message from a client over a channel.
+    pub fn receive_message<I: Into<u8>>(
+        &mut self,
+        client_id: ClientId,
+        channel_id: I,
+    ) -> Option<(Bytes, &String)> {
+        if let Some(connection) = self.connections.get_mut(&client_id) {
+            if let Some(message) = connection.receive_message(channel_id) {
+                return Some((message, connection.player_id()));
+            }
+        }
+        None
+    }
+
+    /// Return ids for all connected clients (iterator)
+    pub fn clients_id_iter(&self) -> impl Iterator<Item = ClientId> + '_ {
+        self.connections
+            .iter()
+            .filter(|(_, c)| c.is_connected())
+            .map(|(id, _)| *id)
+    }
+
+    /// Return ids for all connected clients
+    pub fn clients_id(&self) -> Vec<ClientId> {
+        self.clients_id_iter().collect()
+    }
+
+    /// Return ids for all disconnected clients (iterator)
+    pub fn disconnections_id_iter(&self) -> impl Iterator<Item = ClientId> + '_ {
+        self.connections
+            .iter()
+            .filter(|(_, c)| c.is_disconnected())
+            .map(|(id, _)| *id)
+    }
+
+    /// Return ids for all disconnected clients
+    pub fn disconnections_id(&self) -> Vec<ClientId> {
+        self.disconnections_id_iter().collect()
+    }
+
+    /// Returns the current number of connected clients.
+    pub fn connected_clients(&self) -> usize {
+        self.connections
+            .iter()
+            .filter(|(_, c)| c.is_connected())
+            .count()
+    }
+
+    pub fn is_connected(&self, client_id: ClientId) -> bool {
+        if let Some(connection) = self.connections.get(&client_id) {
+            return connection.is_connected();
+        }
+
+        false
+    }
+
+    /// Advances the server by the duration.
+    /// Should be called every tick
+    pub fn update(&mut self, duration: Duration) {
+        for connection in self.connections.values_mut() {
+            connection.update(duration);
+        }
+    }
+
+    /// Returns a list of packets to be sent to the client.
+    /// <p style="background:rgba(77,220,255,0.16);padding:0.5em;">
+    /// <strong>Note:</strong> This should only be called by the transport layer.
+    /// </p>
+    pub fn get_packets_to_send(
+        &mut self,
+        client_id: ClientId,
+    ) -> Result<Vec<Payload>, ClientNotFound> {
+        match self.connections.get_mut(&client_id) {
+            Some(connection) => Ok(connection.get_packets_to_send()),
+            None => Err(ClientNotFound),
+        }
+    }
+
+    /// Process a packet received from the client.
+    /// <p style="background:rgba(77,220,255,0.16);padding:0.5em;">
+    /// <strong>Note:</strong> This should only be called by the transport layer.
+    /// </p>
+    pub fn process_packet_from(
+        &mut self,
+        payload: &[u8],
+        client_id: ClientId,
+    ) -> Result<(), ClientNotFound> {
+        match self.connections.get_mut(&client_id) {
+            Some(connection) => {
+                connection.process_packet(payload);
+                Ok(())
+            }
+            None => Err(ClientNotFound),
+        }
     }
 }
 
-pub struct ServerOptions {
-    tick_rate: f32,
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Ord, PartialOrd)]
+pub struct ClientId(u64);
+
+impl ClientId {
+    /// Creates a [`ClientId`] from a raw 64 bit value.
+    pub const fn from_raw(value: u64) -> Self {
+        Self(value)
+    }
+
+    /// Returns the raw 64 bit value of the [`ClientId`]
+    pub fn raw(&self) -> u64 {
+        self.0
+    }
+}
+
+impl std::fmt::Display for ClientId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl serde::Serialize for ClientId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.0.serialize(serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ClientId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        u64::deserialize(deserializer).map(ClientId::from_raw)
+    }
 }

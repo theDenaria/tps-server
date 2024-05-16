@@ -1,4 +1,4 @@
-use std::{collections::HashMap, net::SocketAddr};
+use std::collections::HashMap;
 
 use crate::event_in::MoveEvent;
 
@@ -13,22 +13,21 @@ impl GameState {
         }
     }
 
-    pub fn add_player(&mut self, addr: SocketAddr, id: String) -> String {
-        let player = Player::new(id.clone(), addr);
+    pub fn add_player(&mut self, id: &String) {
+        let player = Player::new(id.clone());
         self.players.insert(id.clone(), player); // Insert new player into HashMap
-        id
     }
 
-    pub fn remove_player(&mut self, id: String) {
-        self.players.remove(&id);
+    pub fn remove_player(&mut self, id: &String) {
+        self.players.remove(id);
     }
 
-    pub fn get_player_mut(&mut self, id: String) -> Option<&mut Player> {
-        self.players.get_mut(&id)
+    pub fn get_player_mut(&mut self, id: &String) -> Option<&mut Player> {
+        self.players.get_mut(id)
     }
 
-    pub fn get_player(&self, id: String) -> Option<&Player> {
-        self.players.get(&id)
+    pub fn get_player(&self, id: &String) -> Option<&Player> {
+        self.players.get(id)
     }
 
     pub fn all_players_mut(&mut self) -> Vec<&mut Player> {
@@ -43,8 +42,6 @@ impl GameState {
 pub struct Player {
     // Metadata
     pub id: String,
-    pub connection_status: ConnectionStatus,
-    pub addr: SocketAddr,
     // State attributes
     pub position: PlayerPosition,
     pub rotation: f32,
@@ -52,11 +49,9 @@ pub struct Player {
 }
 
 impl Player {
-    fn new(id: String, addr: SocketAddr) -> Player {
+    fn new(id: String) -> Player {
         Player {
             id,
-            connection_status: ConnectionStatus::Connecting,
-            addr,
             position: PlayerPosition {
                 updated: true,
                 x: 10.0,
@@ -83,16 +78,6 @@ impl Player {
         self.rotation = rotation;
         self.set_position_updated(true);
     }
-
-    pub fn set_connected(&mut self) {
-        self.connection_status = ConnectionStatus::Connected;
-    }
-}
-
-pub enum ConnectionStatus {
-    Connecting = 0,
-    Connected = 1,
-    //TODO Disconnected = 2,
 }
 
 #[derive(Debug, Clone, Copy)]
