@@ -258,7 +258,6 @@ impl UnityClient {
     }
 
     pub fn player_id(&self) -> &String {
-        tracing::trace!("Player_id: {:?}", &self.player_id);
         &self.player_id
     }
 

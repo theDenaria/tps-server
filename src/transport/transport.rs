@@ -4,6 +4,8 @@ use std::{
     time::Duration,
 };
 
+use bevy_ecs::system::Resource;
+
 use crate::{
     constants::TRANSPORT_MAX_PACKET_BYTES,
     server::{ClientId, MattaServer},
@@ -13,8 +15,7 @@ use super::{
     error::TransportError,
     server::server::{ServerConfig, ServerResult, TransportServer},
 };
-
-#[derive(Debug)]
+#[derive(Debug, Resource)]
 pub struct ServerTransport {
     socket: UdpSocket,
     transport_server: TransportServer,

@@ -12,7 +12,7 @@ mod packet;
 mod server;
 mod transport;
 
-use bytes::Bytes;
+use game_state::{send_connect_event, ConnectEvent, JumpEvent, LookEvent, MoveEvent, PlayerLookup};
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 use std::{
@@ -24,12 +24,17 @@ use crate::{
     channel::DefaultChannel,
     connection::ConnectionConfig,
     event_in::{digest_move_event, digest_rotation_event, EventIn, EventInType},
-    event_out::EventOut,
-    game_state::GameState,
-    packet::Packet,
+    game_state::{
+        handle_connect_events, handle_disconnect_events, handle_fire_events, handle_look_events,
+        handle_move_events, on_health_change, on_player_added, on_position_change,
+        on_rotation_change, send_disconnect_event, send_look_event, send_move_event,
+        DisconnectEvent, FireEvent, HandleGameEvents, HandleGameStateChanges,
+    },
     server::{MattaServer, ServerEvent},
     transport::{error::TransportError, server::server::ServerConfig, transport::ServerTransport},
 };
+
+use bevy_ecs::prelude::*;
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
@@ -48,7 +53,7 @@ async fn main() -> io::Result<()> {
 }
 
 fn start_server() -> Result<(), TransportError> {
-    let mut server = MattaServer::new(ConnectionConfig::default());
+    let server = MattaServer::new(ConnectionConfig::default());
 
     // Setup transport layer
     const SERVER_ADDR: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 5000);
@@ -60,137 +65,163 @@ fn start_server() -> Result<(), TransportError> {
         max_clients: 64,
         public_addresses: vec![SERVER_ADDR],
     };
-    let mut transport = ServerTransport::new(server_config, socket).unwrap();
+    let transport = ServerTransport::new(server_config, socket).unwrap();
 
-    let mut game_state = GameState::new();
+    let mut world = World::default();
+
+    let duration = DurationResource::default();
+
+    world.insert_resource(server);
+    world.insert_resource(transport);
+    world.insert_resource(PlayerLookup::new());
+    world.insert_resource(duration);
+
+    // Register events
+    world.insert_resource(Events::<ConnectEvent>::default());
+    world.insert_resource(Events::<DisconnectEvent>::default());
+    world.insert_resource(Events::<MoveEvent>::default());
+    world.insert_resource(Events::<LookEvent>::default());
+    world.insert_resource(Events::<JumpEvent>::default());
+    world.insert_resource(Events::<FireEvent>::default());
+
+    let mut schedule = Schedule::default();
+
+    schedule.add_systems((
+        receive_server_events.in_set(RecServerEvents),
+        handle_server_events
+            .in_set(HandleServerEvents)
+            .after(RecServerEvents),
+        (
+            handle_move_events,
+            handle_look_events,
+            handle_fire_events,
+            handle_connect_events,
+            handle_disconnect_events,
+        )
+            .in_set(HandleGameEvents)
+            .after(HandleServerEvents),
+        (
+            on_player_added,
+            on_position_change,
+            on_rotation_change,
+            on_health_change,
+        )
+            .in_set(HandleGameStateChanges)
+            .after(HandleGameEvents),
+        transport_send_packets.after(HandleGameStateChanges),
+    ));
 
     // Your gameplay loop
     loop {
-        let delta_time = Duration::from_millis(16);
         // Receive new messages and update clients
-        server.update(delta_time);
-        transport.update(delta_time, &mut server)?;
-
-        // Check for client connections/disconnections
-        while let Some(event) = server.get_event() {
-            match event {
-                ServerEvent::ClientConnected { client_id } => {
-                    println!("Client {client_id} connected");
-                }
-                ServerEvent::ClientDisconnected {
-                    client_id,
-                    player_id,
-                    reason,
-                } => {
-                    println!("Client {client_id} disconnected: {reason}");
-                    game_state.remove_player(&player_id);
-                    let disconnect_event = EventOut::disconnect_event(vec![&player_id]).unwrap();
-                    tracing::trace!("Disconnect event: {:?}", disconnect_event);
-                    server
-                        .broadcast_message(DefaultChannel::ReliableOrdered, disconnect_event.data);
-                }
-            }
-        }
-
-        // Receive message from channel
-        for client_id in server.clients_id() {
-            // The enum DefaultChannel describe the channels used by the default configuration
-            while let Some((message, player_id)) =
-                server.receive_message(client_id, DefaultChannel::Unreliable)
-            {
-                let event_in = EventIn::new(message.to_vec()).unwrap();
-
-                match event_in.event_type {
-                    EventInType::Connect => {
-                        let player_id = player_id.clone();
-                        match game_state.get_player(&player_id) {
-                            None => {
-                                let spawned_players = game_state.all_players();
-                                if let Some(spawn_players) = EventOut::spawn_event(spawned_players)
-                                {
-                                    server.send_message(
-                                        client_id,
-                                        DefaultChannel::ReliableOrdered,
-                                        spawn_players.data,
-                                    );
-                                }
-
-                                game_state.add_player(&player_id);
-                                let spawn_new_player =
-                                    EventOut::spawn_event_by_player_id(&player_id);
-                                server.broadcast_message(
-                                    DefaultChannel::ReliableOrdered,
-                                    spawn_new_player.data,
-                                );
-                            }
-                            Some(_) => {}
-                        }
-                    }
-                    EventInType::Rotation => {
-                        let rotation = digest_rotation_event(event_in.data).unwrap();
-                        if let Some(player) = game_state.get_player_mut(player_id) {
-                            player.update_rotation(rotation);
-                            let position_event = EventOut::position_event(vec![player]).unwrap();
-                            server
-                                .broadcast_message(DefaultChannel::Unreliable, position_event.data);
-                        }
-
-                        tracing::trace!("Rotation Message Received: {:?}", rotation);
-                    }
-                    EventInType::Move => {
-                        let move_event = digest_move_event(event_in.data).unwrap();
-                        tracing::trace!("Rotation Message Received: {:?}", move_event);
-                        if let Some(player) = game_state.get_player_mut(player_id) {
-                            player.update_position(move_event);
-                            let position_event = EventOut::position_event(vec![player]).unwrap();
-                            server
-                                .broadcast_message(DefaultChannel::Unreliable, position_event.data);
-                        }
-                    }
-                    EventInType::Invalid => {
-                        tracing::error!("Invalied EventInType");
-                    }
-                }
-            }
-        }
-        // Send packets to clients using the transport layer
-        transport.send_packets(&mut server);
-
-        std::thread::sleep(delta_time); // Running at 60hz
+        schedule.run(&mut world);
     }
 }
 
-fn run_tests() {
-    let event_out = EventOut::spawn_event_by_player_id(&String::from("player1"));
+// Define system labels for ordering
+#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
+struct RecServerEvents;
 
-    tracing::trace!("Event Data : {:?}", event_out);
+fn receive_server_events(
+    mut server: ResMut<MattaServer>,
+    mut transport: ResMut<ServerTransport>,
+    mut delta_time: ResMut<DurationResource>,
+    mut disconnect_event: EventWriter<DisconnectEvent>,
+) {
+    delta_time.0 = Duration::from_millis(16);
+    server.update(delta_time.0);
+    transport.update(delta_time.0, &mut server).unwrap();
 
-    let messages = vec![Bytes::from(event_out.data)];
-
-    let sample = Packet::SmallUnreliable {
-        channel_id: 0,
-        messages: messages.clone(),
-    };
-
-    let sample_reliable = Packet::SmallReliable {
-        channel_id: 1,
-        packet_type: 0,
-        packet_process_time: 0,
-        sequence_id: 1,
-        acked_seq_id: u16::MAX,
-        acked_mask: 0,
-        messages: vec![(0, messages[0].clone()), (1, messages[0].clone())],
-    };
-
-    let mut buffer = [0u8; 1400];
-
-    let len = sample_reliable.to_bytes(&mut buffer).unwrap();
-
-    tracing::trace!("SAMPLE PACKET: {:?}", sample_reliable);
-    tracing::trace!("SAMPLE PACKET to bytes: {:?}", &buffer[..len]);
-
-    let len = sample.to_bytes(&mut buffer).unwrap();
-
-    tracing::trace!("SAMPLE PACKET: {:?}", sample);
-    tracing::trace!("SAMPLE PACKET to bytes: {:?}", &buffer[..len]);
+    // Check for client connections/disconnections
+    while let Some(event) = server.get_event() {
+        match event {
+            ServerEvent::ClientConnected { client_id } => {
+                println!("Client {client_id} connected");
+            }
+            ServerEvent::ClientDisconnected {
+                client_id,
+                player_id,
+                reason,
+            } => {
+                println!("Client {client_id} disconnected: {reason}");
+                send_disconnect_event(player_id, &mut disconnect_event);
+            }
+        }
+    }
 }
+
+#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
+struct HandleServerEvents;
+
+fn handle_server_events(
+    mut server: ResMut<MattaServer>,
+    player_lookup: Res<PlayerLookup>,
+    mut connect_event: EventWriter<ConnectEvent>,
+    mut move_event: EventWriter<MoveEvent>,
+    mut look_event: EventWriter<LookEvent>,
+    // mut jump_event: EventWriter<JumpEvent>,
+) {
+    // Receive message from channel
+
+    server.clients_id().iter().for_each(|client_id| {
+        while let Some((message, player_id)) =
+            server.receive_message(*client_id, DefaultChannel::Unreliable)
+        {
+            let event_in = EventIn::new(message.to_vec()).unwrap();
+
+            match event_in.event_type {
+                EventInType::Rotation => {
+                    let rotation = digest_rotation_event(event_in.data).unwrap();
+                    send_look_event(
+                        player_id,
+                        0.0,
+                        rotation,
+                        0.0,
+                        &player_lookup,
+                        &mut look_event,
+                    );
+                    tracing::trace!("Rotation Message Received: {:?}", rotation);
+                }
+                EventInType::Move => {
+                    let move_event_in = digest_move_event(event_in.data).unwrap();
+                    send_move_event(
+                        player_id,
+                        move_event_in.x,
+                        move_event_in.y,
+                        &player_lookup,
+                        &mut move_event,
+                    );
+                    tracing::trace!("Move Message Received: {:?}", move_event_in);
+                }
+                EventInType::Connect => {
+                    send_connect_event(player_id, &mut connect_event);
+                }
+                EventInType::Invalid => {
+                    tracing::error!("Invalied EventInType");
+                }
+            }
+        }
+    });
+}
+
+#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
+struct SendTransportPackages;
+
+fn transport_send_packets(
+    mut server: ResMut<MattaServer>,
+    mut transport: ResMut<ServerTransport>,
+    delta_time: Res<DurationResource>,
+) {
+    transport.send_packets(&mut server);
+    std::thread::sleep(delta_time.0); // Running at 60hz
+}
+
+struct DurationResource(Duration);
+
+impl Default for DurationResource {
+    fn default() -> Self {
+        DurationResource(Duration::default())
+    }
+}
+
+impl Resource for DurationResource {}
