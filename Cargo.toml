@@ -16,3 +16,4 @@ bytes = { version = "1", features = ["serde"] }
 octets = "0.3.0"
 byteorder = "1.5.0"
 bevy_ecs = "0.13.2"
+rapier3d = { version = "0.19.0", features = [ "simd-stable" ] }

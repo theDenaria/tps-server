@@ -5,7 +5,7 @@ use crate::{
         TRANSPORT_MAX_CLIENTS, TRANSPORT_MAX_PACKET_BYTES, TRANSPORT_MAX_PENDING_CLIENTS,
         TRANSPORT_SEND_RATE,
     },
-    transport::server::packet::Packet,
+    server::transport::server::packet::Packet,
 };
 
 use super::error::TransportServerError;

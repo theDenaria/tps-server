@@ -1,16 +1,17 @@
 use bevy_ecs::{query::Changed, system::Query};
 use bincode;
+use rapier3d::math::{Real, Vector};
 use serde::{Deserialize, Serialize};
 
-use crate::game_state::{Player, Position, Rotation};
+use crate::ecs::components::Player;
 
 #[derive(Debug)]
-pub struct EventOut {
-    pub event_type: EventOutType,
+pub struct MessageOut {
+    pub event_type: MessageOutType,
     pub data: Vec<u8>,
 }
 
-impl EventOut {
+impl MessageOut {
     pub fn get_with_event_header(&self, identifier: Vec<u8>) -> Vec<u8> {
         let mut with_header: Vec<u8> = vec![];
         with_header.push(1);
@@ -21,63 +22,65 @@ impl EventOut {
         with_header
     }
 
-    pub fn position_event(positions: Vec<(Position, String)>) -> Option<EventOut> {
+    pub fn position_message(positions: Vec<(Vector<Real>, String)>) -> Option<MessageOut> {
         let position_details: Vec<PositionDetails> = positions
             .iter()
             .map(|(position, player_id)| {
                 let player_id_bytes = normalize_player_id(player_id.as_str());
                 PositionDetails {
                     player_id: player_id_bytes,
-                    position: position.clone(),
+                    position,
                 }
             })
             .collect();
 
         if positions.len() > 0 {
-            let position_event = PositionEventOut {
+            let position_event = PositionMessageOut {
                 positions: position_details,
             };
             tracing::info!("{:?}", position_event);
 
             let mut serialized = bincode::serialize(&position_event).unwrap();
             serialized.insert(0, 1); // Position Event Type 1
-            return Some(EventOut {
-                event_type: EventOutType::Position,
+            return Some(MessageOut {
+                event_type: MessageOutType::Position,
                 data: serialized,
             });
         }
         None
     }
 
-    pub fn rotation_event(
-        query: &Query<(&Player, &Rotation), Changed<Rotation>>,
-    ) -> Option<EventOut> {
-        let rotations: Vec<RotationDetails> = query
+    pub fn rotation_message(rotations: Vec<(Vector<Real>, String)>) -> Option<MessageOut> {
+        let rotations: Vec<RotationDetails> = rotations
             .iter()
             .map(|(player, rotation)| {
                 let player_id_bytes = normalize_player_id(player.id.as_str());
                 RotationDetails {
                     player_id: player_id_bytes,
-                    rotation: rotation.clone(),
+                    rotation: rotation,
                 }
             })
             .collect();
 
         if rotations.len() > 0 {
-            let rotation_event = RotationEventOut { rotations };
+            let rotation_event = RotationMessageOut { rotations };
             tracing::info!("{:?}", rotation_event);
 
             let mut serialized = bincode::serialize(&rotation_event).unwrap();
             serialized.insert(0, 2); // Rotation Event Type 1
-            return Some(EventOut {
-                event_type: EventOutType::Rotation,
+            return Some(MessageOut {
+                event_type: MessageOutType::Rotation,
                 data: serialized,
             });
         }
         None
     }
 
-    pub fn spawn_new_event(player_id: String, position: Position, rotation: Rotation) -> EventOut {
+    pub fn spawn_new_message(
+        player_id: String,
+        position: Position,
+        rotation: Rotation,
+    ) -> MessageOut {
         let player_id_bytes = normalize_player_id(player_id.as_str());
         let spawns: Vec<SpawnDetails> = vec![SpawnDetails {
             player_id: player_id_bytes,
@@ -85,21 +88,21 @@ impl EventOut {
             rotation,
         }];
 
-        let spawn_event = SpawnEventOut { spawns };
+        let spawn_event = SpawnMessageOut { spawns };
 
         let mut serialized = bincode::serialize(&spawn_event).unwrap();
 
         serialized.insert(0, 0); // Spawn Event Type 0
 
-        EventOut {
-            event_type: EventOutType::Spawn,
+        MessageOut {
+            event_type: MessageOutType::Spawn,
             data: serialized,
         }
     }
 
-    pub fn spawn_event_for_all_players(
+    pub fn spawn_message_for_all_players(
         query: &Query<(&Player, &Position, &Rotation)>,
-    ) -> Option<EventOut> {
+    ) -> Option<MessageOut> {
         let spawns: Vec<SpawnDetails> = query
             .iter()
             .map(|(player, position, rotation)| {
@@ -112,21 +115,21 @@ impl EventOut {
             })
             .collect();
         if spawns.len() > 0 {
-            let spawn_event = SpawnEventOut { spawns };
+            let spawn_event = SpawnMessageOut { spawns };
 
             let mut serialized = bincode::serialize(&spawn_event).unwrap();
 
             serialized.insert(0, 0); // Spawn Event Type 0
 
-            return Some(EventOut {
-                event_type: EventOutType::Spawn,
+            return Some(MessageOut {
+                event_type: MessageOutType::Spawn,
                 data: serialized,
             });
         }
         None
     }
 
-    pub fn disconnect_event(player_ids: Vec<&String>) -> Option<EventOut> {
+    pub fn disconnect_message(player_ids: Vec<&String>) -> Option<MessageOut> {
         let player_num = player_ids.len() as u32;
         if player_num < 1 {
             return None;
@@ -140,14 +143,14 @@ impl EventOut {
             });
         }
 
-        let disconnect_event = DisconnectEvent { disconnects };
+        let disconnect_event = DisconnectMessage { disconnects };
 
         let mut serialized = bincode::serialize(&disconnect_event).unwrap();
 
         serialized.insert(0, 10); // Disconnect Event Type 10
 
-        Some(EventOut {
-            event_type: EventOutType::Disconnect,
+        Some(MessageOut {
+            event_type: MessageOutType::Disconnect,
             data: serialized,
         })
     }
@@ -162,7 +165,7 @@ fn normalize_player_id(player_id: &str) -> [u8; 16] {
 }
 
 #[derive(Debug)]
-pub enum EventOutType {
+pub enum MessageOutType {
     Spawn = 0,
     Position = 1,
     Rotation = 2,
@@ -170,28 +173,28 @@ pub enum EventOutType {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct PositionEventOut {
+struct PositionMessageOut {
     positions: Vec<PositionDetails>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 struct PositionDetails {
     player_id: [u8; 16],
-    position: Position,
+    position: Vector<Real>,
 }
 #[derive(Serialize, Deserialize, Debug)]
-struct RotationEventOut {
+struct RotationMessageOut {
     rotations: Vec<RotationDetails>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 struct RotationDetails {
     player_id: [u8; 16],
-    rotation: Rotation,
+    rotation: Vector<Real>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct SpawnEventOut {
+struct SpawnMessageOut {
     spawns: Vec<SpawnDetails>,
 }
 
@@ -203,7 +206,7 @@ struct SpawnDetails {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct DisconnectEvent {
+struct DisconnectMessage {
     disconnects: Vec<DisconnectDetails>,
 }
 #[derive(Serialize, Deserialize, Debug)]

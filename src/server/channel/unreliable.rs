@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use bytes::Bytes;
 
-use crate::{constants::MAX_MESSAGES_LENGTH, packet::Packet};
+use crate::{constants::MAX_MESSAGES_LENGTH, server::packet::Packet};
 
 #[derive(Debug)]
 pub struct SendChannelUnreliable {

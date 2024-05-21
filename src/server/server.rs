@@ -1,11 +1,12 @@
-use crate::connection::{ConnectionConfig, NetworkInfo, UnityClient};
-use crate::error::{ClientNotFound, DisconnectReason};
-use crate::packet::Payload;
 use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
 
 use bevy_ecs::system::Resource;
 use bytes::Bytes;
+
+use super::connection::{ConnectionConfig, NetworkInfo, UnityClient};
+use super::error::{ClientNotFound, DisconnectReason};
+use super::packet::Payload;
 
 /// Connection and disconnection events in the server.
 #[derive(Debug, PartialEq, Eq)]

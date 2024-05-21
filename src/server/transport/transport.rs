@@ -8,7 +8,7 @@ use bevy_ecs::system::Resource;
 
 use crate::{
     constants::TRANSPORT_MAX_PACKET_BYTES,
-    server::{ClientId, MattaServer},
+    server::server::{ClientId, MattaServer},
 };
 
 use super::{

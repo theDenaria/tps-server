@@ -5,7 +5,10 @@ use std::{
 
 use bytes::Bytes;
 
-use crate::{constants::MAX_MESSAGES_LENGTH, error::ChannelError, packet::Packet};
+use crate::{
+    constants::MAX_MESSAGES_LENGTH,
+    server::{error::ChannelError, packet::Packet},
+};
 
 #[derive(Debug)]
 enum UnackedMessage {
