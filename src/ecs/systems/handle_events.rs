@@ -91,7 +91,7 @@ pub fn handle_look_events(
     for event in look_events.read() {
         if let Ok((player, physics)) = query.get(event.entity) {
             let PhysicsResources { rigid_body_set, .. } = &mut *physics_res;
-            let mut rigid_body = rigid_body_set.get_mut(physics.rigid_body_handle).unwrap();
+            let rigid_body = rigid_body_set.get_mut(physics.rigid_body_handle).unwrap();
             let rotation = vector![event.x, event.y, event.z];
             rigid_body.set_rotation(rotation, true);
 

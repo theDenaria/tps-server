@@ -1,7 +1,8 @@
 use bevy_ecs::{event::EventWriter, system::Res};
+use rapier3d::na::Vector3;
 
 use crate::ecs::{
-    components::{PlayerLookup, Position, Rotation},
+    components::PlayerLookup,
     events::{ConnectEvent, DisconnectEvent, FireEvent, JumpEvent, LookEvent, MoveEvent},
 };
 
@@ -59,16 +60,16 @@ pub fn send_jump_event(
 
 pub fn send_fire_event(
     player_id: String,
-    position: Position,
-    rotation: Rotation,
+    origin: Vector3<f32>,
+    direction: Vector3<f32>,
     player_lookup: Res<PlayerLookup>,
     mut fire_event: EventWriter<FireEvent>,
 ) {
     if let Some(player_entity) = player_lookup.map.get(&player_id) {
         fire_event.send(FireEvent {
             entity: *player_entity,
-            position,
-            rotation,
+            origin,
+            direction,
         });
     } else {
         tracing::warn!("Player ID not found: {}", player_id);

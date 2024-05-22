@@ -60,8 +60,6 @@ pub fn setup(mut commands: Commands) {
         character_controller,
     };
 
-    commands.insert_resource(character_controller);
-
     commands.insert_resource(server);
     commands.insert_resource(transport);
     commands.insert_resource(PlayerLookup::new());

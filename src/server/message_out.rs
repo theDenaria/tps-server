@@ -1,6 +1,9 @@
 use bevy_ecs::{query::Changed, system::Query};
 use bincode;
-use rapier3d::math::{Real, Vector};
+use rapier3d::{
+    math::{Real, Vector},
+    na::Vector3,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::ecs::components::Player;
@@ -22,7 +25,7 @@ impl MessageOut {
         with_header
     }
 
-    pub fn position_message(positions: Vec<(Vector<Real>, String)>) -> Option<MessageOut> {
+    pub fn position_message(positions: Vec<(Vector3<f32>, String)>) -> Option<MessageOut> {
         let position_details: Vec<PositionDetails> = positions
             .iter()
             .map(|(position, player_id)| {
@@ -50,7 +53,7 @@ impl MessageOut {
         None
     }
 
-    pub fn rotation_message(rotations: Vec<(Vector<Real>, String)>) -> Option<MessageOut> {
+    pub fn rotation_message(rotations: Vec<(Vector3<f32>, String)>) -> Option<MessageOut> {
         let rotations: Vec<RotationDetails> = rotations
             .iter()
             .map(|(player, rotation)| {
@@ -70,59 +73,6 @@ impl MessageOut {
             serialized.insert(0, 2); // Rotation Event Type 1
             return Some(MessageOut {
                 event_type: MessageOutType::Rotation,
-                data: serialized,
-            });
-        }
-        None
-    }
-
-    pub fn spawn_new_message(
-        player_id: String,
-        position: Position,
-        rotation: Rotation,
-    ) -> MessageOut {
-        let player_id_bytes = normalize_player_id(player_id.as_str());
-        let spawns: Vec<SpawnDetails> = vec![SpawnDetails {
-            player_id: player_id_bytes,
-            position,
-            rotation,
-        }];
-
-        let spawn_event = SpawnMessageOut { spawns };
-
-        let mut serialized = bincode::serialize(&spawn_event).unwrap();
-
-        serialized.insert(0, 0); // Spawn Event Type 0
-
-        MessageOut {
-            event_type: MessageOutType::Spawn,
-            data: serialized,
-        }
-    }
-
-    pub fn spawn_message_for_all_players(
-        query: &Query<(&Player, &Position, &Rotation)>,
-    ) -> Option<MessageOut> {
-        let spawns: Vec<SpawnDetails> = query
-            .iter()
-            .map(|(player, position, rotation)| {
-                let player_id_bytes = normalize_player_id(player.id.as_str());
-                SpawnDetails {
-                    player_id: player_id_bytes,
-                    position: position.clone(),
-                    rotation: rotation.clone(),
-                }
-            })
-            .collect();
-        if spawns.len() > 0 {
-            let spawn_event = SpawnMessageOut { spawns };
-
-            let mut serialized = bincode::serialize(&spawn_event).unwrap();
-
-            serialized.insert(0, 0); // Spawn Event Type 0
-
-            return Some(MessageOut {
-                event_type: MessageOutType::Spawn,
                 data: serialized,
             });
         }
@@ -191,18 +141,6 @@ struct RotationMessageOut {
 struct RotationDetails {
     player_id: [u8; 16],
     rotation: Vector<Real>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct SpawnMessageOut {
-    spawns: Vec<SpawnDetails>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct SpawnDetails {
-    player_id: [u8; 16],
-    position: Position,
-    rotation: Rotation,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

@@ -9,7 +9,7 @@ use rapier3d::math::{Real, Vector};
 use crate::{
     ecs::{
         components::{Health, Player},
-        events::PositionChangeEvent,
+        events::{PositionChangeEvent, RotationChangeEvent},
     },
     server::{channel::DefaultChannel, message_out::MessageOut, server::MattaServer},
 };
@@ -33,11 +33,15 @@ pub fn on_position_change(
 }
 
 pub fn on_rotation_change(
-    query: Query<(&Player, &Rotation), Changed<Rotation>>,
+    mut rotation_change_events: EventReader<RotationChangeEvent>,
     mut server: ResMut<MattaServer>,
 ) {
-    if let Some(rotation_event) = MessageOut::rotation_message(&query) {
-        tracing::trace!("ROTATION EVENT TO SEND: {:?}", rotation_event);
+    let mut rotations: Vec<(Vector<Real>, String)> = vec![];
+    for event in rotation_change_events.read() {
+        rotations.push((event.rotation, event.player_id));
+    }
+
+    if let Some(rotation_event) = MessageOut::rotation_message(rotations) {
         server.broadcast_message(DefaultChannel::Unreliable, rotation_event.data);
     }
 }
@@ -45,33 +49,5 @@ pub fn on_rotation_change(
 pub fn on_health_change(query: Query<(&Player, &Health), Changed<Health>>) {
     for (player, health) in &query {
         // Broadcast health update
-    }
-}
-
-pub fn on_player_added(
-    added_players_query: Query<(&Player, &Position, &Rotation, &Health), Added<Player>>,
-    all_players_query: Query<(&Player, &Position, &Rotation)>,
-    mut server: ResMut<MattaServer>,
-) {
-    for (player, position, rotation, health) in added_players_query.iter() {
-        if let Ok(added_client_id) = server.client_id_by_player_id(player.id.clone()) {
-            if let Some(spawn_all) = MessageOut::spawn_message_for_all_players(&all_players_query) {
-                server.send_message(
-                    added_client_id,
-                    DefaultChannel::ReliableOrdered,
-                    spawn_all.data,
-                )
-            }
-            let spawn = MessageOut::spawn_new_message(
-                player.id.clone(),
-                position.clone(),
-                rotation.clone(),
-            );
-            server.broadcast_message_except(
-                added_client_id,
-                DefaultChannel::ReliableOrdered,
-                spawn.data,
-            )
-        }
     }
 }
