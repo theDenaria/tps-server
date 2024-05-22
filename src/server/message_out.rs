@@ -1,12 +1,6 @@
-use bevy_ecs::{query::Changed, system::Query};
 use bincode;
-use rapier3d::{
-    math::{Real, Vector},
-    na::Vector3,
-};
+use rapier3d::na::Vector3;
 use serde::{Deserialize, Serialize};
-
-use crate::ecs::components::Player;
 
 #[derive(Debug)]
 pub struct MessageOut {
@@ -32,7 +26,7 @@ impl MessageOut {
                 let player_id_bytes = normalize_player_id(player_id.as_str());
                 PositionDetails {
                     player_id: player_id_bytes,
-                    position,
+                    position: *position,
                 }
             })
             .collect();
@@ -56,11 +50,11 @@ impl MessageOut {
     pub fn rotation_message(rotations: Vec<(Vector3<f32>, String)>) -> Option<MessageOut> {
         let rotations: Vec<RotationDetails> = rotations
             .iter()
-            .map(|(player, rotation)| {
-                let player_id_bytes = normalize_player_id(player.id.as_str());
+            .map(|(rotation, player_id)| {
+                let player_id_bytes = normalize_player_id(player_id.as_str());
                 RotationDetails {
                     player_id: player_id_bytes,
-                    rotation: rotation,
+                    rotation: *rotation,
                 }
             })
             .collect();
@@ -116,7 +110,6 @@ fn normalize_player_id(player_id: &str) -> [u8; 16] {
 
 #[derive(Debug)]
 pub enum MessageOutType {
-    Spawn = 0,
     Position = 1,
     Rotation = 2,
     Disconnect = 10,
@@ -130,7 +123,7 @@ struct PositionMessageOut {
 #[derive(Serialize, Deserialize, Debug)]
 struct PositionDetails {
     player_id: [u8; 16],
-    position: Vector<Real>,
+    position: Vector3<f32>,
 }
 #[derive(Serialize, Deserialize, Debug)]
 struct RotationMessageOut {
@@ -140,7 +133,7 @@ struct RotationMessageOut {
 #[derive(Serialize, Deserialize, Debug)]
 struct RotationDetails {
     player_id: [u8; 16],
-    rotation: Vector<Real>,
+    rotation: Vector3<f32>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

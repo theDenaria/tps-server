@@ -1,11 +1,7 @@
 use std::collections::HashMap;
 
 use bevy_ecs::{bundle::Bundle, component::Component, entity::Entity, system::Resource};
-use rapier3d::{
-    dynamics::{RigidBody, RigidBodyHandle},
-    geometry::{Collider, ColliderBuilder, ColliderHandle},
-};
-use serde::{Deserialize, Serialize};
+use rapier3d::{dynamics::RigidBodyHandle, geometry::ColliderHandle};
 
 #[derive(Default, Component)]
 pub struct Player {
@@ -14,7 +10,7 @@ pub struct Player {
 #[derive(Default, Component)]
 pub struct Health(f32);
 
-#[derive(Component)]
+#[derive(Debug, Component)]
 pub struct PlayerPhysics {
     pub rigid_body_handle: RigidBodyHandle,
     pub collider_handle: ColliderHandle,

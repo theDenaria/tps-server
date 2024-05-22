@@ -13,10 +13,7 @@ use ecs::systems::{
     handle_server::{
         handle_server_events, handle_server_messages, transport_send_packets, HandleServer,
     },
-    on_change::{
-        on_health_change, on_player_added, on_position_change, on_rotation_change,
-        HandleGameStateChanges,
-    },
+    on_change::{on_health_change, on_position_change, on_rotation_change, HandleGameStateChanges},
     physics::{physics_step, Physics},
     setup::setup,
 };
@@ -52,10 +49,6 @@ fn start_server() -> Result<(), TransportError> {
     let mut schedule = Schedule::default();
 
     schedule.add_systems((
-        // receive_server_events.in_set(RecServerEvents),
-        // handle_server_events
-        //     .in_set(HandleServerEvents)
-        //     .after(RecServerEvents),
         (handle_server_messages, handle_server_events)
             .chain()
             .in_set(HandleServer),
@@ -69,12 +62,7 @@ fn start_server() -> Result<(), TransportError> {
             .in_set(HandleGameEvents)
             .after(HandleServer),
         physics_step.in_set(Physics).after(HandleServer),
-        (
-            on_player_added,
-            on_position_change,
-            on_rotation_change,
-            on_health_change,
-        )
+        (on_position_change, on_rotation_change, on_health_change)
             .in_set(HandleGameStateChanges)
             .after(Physics),
         transport_send_packets.after(HandleGameStateChanges),

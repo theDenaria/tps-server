@@ -15,7 +15,10 @@ use rapier3d::{
 use crate::{
     ecs::{
         components::PlayerLookup,
-        events::{ConnectEvent, DisconnectEvent, FireEvent, JumpEvent, LookEvent, MoveEvent},
+        events::{
+            ConnectEvent, DisconnectEvent, FireEvent, JumpEvent, LookEvent, MoveEvent,
+            PositionChangeEvent, RotationChangeEvent,
+        },
         systems::physics::PhysicsResources,
     },
     server::{
@@ -64,6 +67,7 @@ pub fn setup(mut commands: Commands) {
     commands.insert_resource(transport);
     commands.insert_resource(PlayerLookup::new());
     commands.insert_resource(duration);
+    commands.insert_resource(physics_res);
 
     commands.insert_resource(Events::<ConnectEvent>::default());
     commands.insert_resource(Events::<DisconnectEvent>::default());
@@ -71,6 +75,8 @@ pub fn setup(mut commands: Commands) {
     commands.insert_resource(Events::<LookEvent>::default());
     commands.insert_resource(Events::<JumpEvent>::default());
     commands.insert_resource(Events::<FireEvent>::default());
+    commands.insert_resource(Events::<RotationChangeEvent>::default());
+    commands.insert_resource(Events::<PositionChangeEvent>::default());
 }
 
 #[derive(Resource)]

@@ -4,7 +4,7 @@ use bevy_ecs::{
     system::{Commands, Query, ResMut},
 };
 
-use rapier3d::prelude::*;
+use rapier3d::{na::UnitQuaternion, prelude::*};
 
 use crate::{
     constants::VELOCITY_MUL,
@@ -38,8 +38,13 @@ pub fn handle_move_events(
                 character_controller,
                 ..
             } = &mut *physics_res;
-            let rigid_body = rigid_body_set.get_mut(physics.rigid_body_handle).unwrap();
-            let collider = collider_set.get_mut(physics.collider_handle).unwrap();
+
+            let rigid_body_handle = physics.rigid_body_handle;
+            let collider_handle = physics.collider_handle;
+
+            let current_translation = rigid_body_set[rigid_body_handle].translation();
+            let current_position = rigid_body_set[rigid_body_handle].position();
+            let collider_shape = collider_set[collider_handle].shape().clone();
 
             let direction = vector![event.x, 0.0, event.y];
             let normalized_direction = if direction.magnitude() > 0.0 {
@@ -52,19 +57,16 @@ pub fn handle_move_events(
 
             let desired_translation = normalized_direction * VELOCITY_MUL * dt;
 
-            // Current position of the character
-            let current_translation = rigid_body.translation();
-
             // Calculate the target position by adding the desired translation
             let desired_translation = current_translation + desired_translation;
 
             let corrected_movement = character_controller.move_shape(
-                dt,                    // The timestep length (can be set to SimulationSettings::dt).
-                rigid_body_set,        // The RigidBodySet.
-                collider_set,          // The ColliderSet.
-                query_pipeline,        // The QueryPipeline.
-                collider.shape(),      // The character’s shape.
-                rigid_body.position(), // The character’s initial position.
+                dt,               // The timestep length (can be set to SimulationSettings::dt).
+                rigid_body_set,   // The RigidBodySet.
+                collider_set,     // The ColliderSet.
+                query_pipeline,   // The QueryPipeline.
+                collider_shape,   // The character’s shape.
+                current_position, // The character’s initial position.
                 desired_translation,
                 QueryFilter::default()
                     // Make sure the character we are trying to move isn’t considered an obstacle.
@@ -72,10 +74,12 @@ pub fn handle_move_events(
                 |_| {}, // We don’t care about events in this example.
             );
 
+            let rigid_body = rigid_body_set.get_mut(physics.rigid_body_handle).unwrap();
             rigid_body.set_translation(corrected_movement.translation, true);
 
+            tracing::info!("Position update event sent");
             position_update_event.send(PositionChangeEvent {
-                player_id: player.id,
+                player_id: player.id.clone(),
                 translation: corrected_movement.translation,
             });
         }
@@ -93,10 +97,11 @@ pub fn handle_look_events(
             let PhysicsResources { rigid_body_set, .. } = &mut *physics_res;
             let rigid_body = rigid_body_set.get_mut(physics.rigid_body_handle).unwrap();
             let rotation = vector![event.x, event.y, event.z];
-            rigid_body.set_rotation(rotation, true);
+            let rot_quaternion = UnitQuaternion::from_euler_angles(event.x, event.y, event.z);
+            rigid_body.set_rotation(rot_quaternion, true);
 
             rotation_update_event.send(RotationChangeEvent {
-                player_id: player.id,
+                player_id: player.id.clone(),
                 rotation,
             });
         }
@@ -116,14 +121,15 @@ pub fn handle_connect_events(
     mut connect_events: EventReader<ConnectEvent>,
     mut player_lookup: ResMut<PlayerLookup>,
     mut physics_res: ResMut<PhysicsResources>,
+    mut position_change_event: EventWriter<PositionChangeEvent>,
 ) {
     for event in connect_events.read() {
         if !player_lookup.map.contains_key(&event.player_id) {
-            tracing::trace!("Handle connect event: {:?}", event.player_id);
+            let initial_translation = vector![0.0, 5.0, 1.0];
             let rigid_body = RigidBodyBuilder::new(RigidBodyType::KinematicPositionBased)
                 // The rigid body translation.
                 // Default: zero vector.
-                .translation(vector![0.0, 5.0, 1.0])
+                .translation(initial_translation.clone())
                 // All done, actually build the rigid-body.
                 .build();
             let collider = ColliderBuilder::capsule_y(0.5, 0.2).build();
@@ -154,6 +160,11 @@ pub fn handle_connect_events(
                 })
                 .id();
             player_lookup.map.insert(event.player_id.clone(), entity);
+
+            position_change_event.send(PositionChangeEvent {
+                player_id: event.player_id.clone(),
+                translation: initial_translation,
+            });
         }
     }
 }

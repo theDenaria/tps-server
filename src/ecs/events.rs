@@ -4,7 +4,7 @@ use rapier3d::{
     na::Vector3,
 };
 
-#[derive(Event)]
+#[derive(Debug, Event)]
 pub struct MoveEvent {
     pub entity: Entity,
     pub x: f32,

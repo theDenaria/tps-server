@@ -10,7 +10,7 @@ pub fn send_move_event(
     player_id: &String,
     move_x: f32,
     move_y: f32,
-    player_lookup: &Res<PlayerLookup>,
+    player_lookup: &PlayerLookup,
     move_event: &mut EventWriter<MoveEvent>,
 ) {
     if let Some(player_entity) = player_lookup.map.get(player_id) {
@@ -29,7 +29,7 @@ pub fn send_look_event(
     look_x: f32,
     look_y: f32,
     look_z: f32,
-    player_lookup: &Res<PlayerLookup>,
+    player_lookup: &PlayerLookup,
     look_event: &mut EventWriter<LookEvent>,
 ) {
     if let Some(player_entity) = player_lookup.map.get(player_id) {
@@ -46,7 +46,7 @@ pub fn send_look_event(
 
 pub fn send_jump_event(
     player_id: String,
-    player_lookup: Res<PlayerLookup>,
+    player_lookup: PlayerLookup,
     mut jump_event: EventWriter<JumpEvent>,
 ) {
     if let Some(player_entity) = player_lookup.map.get(&player_id) {
@@ -62,7 +62,7 @@ pub fn send_fire_event(
     player_id: String,
     origin: Vector3<f32>,
     direction: Vector3<f32>,
-    player_lookup: Res<PlayerLookup>,
+    player_lookup: PlayerLookup,
     mut fire_event: EventWriter<FireEvent>,
 ) {
     if let Some(player_entity) = player_lookup.map.get(&player_id) {

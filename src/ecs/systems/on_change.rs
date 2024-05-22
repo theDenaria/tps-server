@@ -1,6 +1,6 @@
 use bevy_ecs::{
     event::EventReader,
-    query::{Added, Changed},
+    query::Changed,
     schedule::SystemSet,
     system::{Query, ResMut},
 };
@@ -23,8 +23,9 @@ pub fn on_position_change(
     mut server: ResMut<MattaServer>,
 ) {
     let mut positions: Vec<(Vector<Real>, String)> = vec![];
+
     for event in position_change_events.read() {
-        positions.push((event.translation, event.player_id));
+        positions.push((event.translation, event.player_id.clone()));
     }
 
     if let Some(position_event) = MessageOut::position_message(positions) {
@@ -38,7 +39,7 @@ pub fn on_rotation_change(
 ) {
     let mut rotations: Vec<(Vector<Real>, String)> = vec![];
     for event in rotation_change_events.read() {
-        rotations.push((event.rotation, event.player_id));
+        rotations.push((event.rotation, event.player_id.clone()));
     }
 
     if let Some(rotation_event) = MessageOut::rotation_message(rotations) {

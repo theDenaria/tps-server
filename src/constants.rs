@@ -9,4 +9,4 @@ pub const TRANSPORT_MAX_PAYLOAD_BYTES: usize = 1300;
 pub const MAX_MESSAGES_LENGTH: usize = 1200;
 pub const TRANSPORT_SEND_RATE: Duration = Duration::from_millis(250);
 
-pub static VELOCITY_MUL: f32 = 0.1;
+pub static VELOCITY_MUL: f32 = 5.0;
