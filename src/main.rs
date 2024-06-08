@@ -7,15 +7,15 @@ mod server;
 
 use ecs::systems::{
     handle_events::{
-        handle_connect_events, handle_disconnect_events, handle_fire_events, handle_look_events,
-        handle_move_events, HandleGameEvents,
+        handle_connect_events, handle_disconnect_events, handle_fire_events, handle_jump_events,
+        handle_look_events, handle_move_events, HandleGameEvents,
     },
     handle_server::{
         handle_server_events, handle_server_messages, transport_send_packets, HandleServer,
     },
     on_change::{on_health_change, on_position_change, on_rotation_change, HandleGameStateChanges},
-    physics::{physics_step, Physics},
-    setup::setup,
+    physics::{handle_air_movement, physics_step, update_physic_components, Physics},
+    setup::{setup, setup_level},
 };
 use server::transport::error::TransportError;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
@@ -43,7 +43,7 @@ fn start_server() -> Result<(), TransportError> {
 
     let mut setup_schedule = Schedule::default();
 
-    setup_schedule.add_systems(setup);
+    setup_schedule.add_systems((setup, setup_level).chain());
     setup_schedule.run(&mut world);
 
     let mut schedule = Schedule::default();
@@ -56,12 +56,16 @@ fn start_server() -> Result<(), TransportError> {
             handle_move_events,
             handle_look_events,
             handle_fire_events,
+            handle_jump_events,
             handle_connect_events,
             handle_disconnect_events,
         )
             .in_set(HandleGameEvents)
             .after(HandleServer),
-        physics_step.in_set(Physics).after(HandleServer),
+        (physics_step, handle_air_movement, update_physic_components)
+            .chain()
+            .in_set(Physics)
+            .after(HandleGameEvents),
         (on_position_change, on_rotation_change, on_health_change)
             .in_set(HandleGameStateChanges)
             .after(Physics),

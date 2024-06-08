@@ -1,8 +1,5 @@
 use bevy_ecs::{entity::Entity, event::Event};
-use rapier3d::{
-    math::{Real, Vector},
-    na::Vector3,
-};
+use rapier3d::na::{Point3, Vector3};
 
 #[derive(Debug, Event)]
 pub struct MoveEvent {
@@ -11,26 +8,14 @@ pub struct MoveEvent {
     pub y: f32,
 }
 
-#[derive(Event)]
+#[derive(Debug, Event)]
 pub struct LookEvent {
     pub entity: Entity,
     pub x: f32,
     pub y: f32,
     pub z: f32,
+    pub w: f32,
 }
-
-#[derive(Event)]
-pub struct PositionChangeEvent {
-    pub player_id: String,
-    pub translation: Vector<Real>,
-}
-
-#[derive(Event)]
-pub struct RotationChangeEvent {
-    pub player_id: String,
-    pub rotation: Vector<Real>,
-}
-
 #[derive(Event)]
 pub struct JumpEvent {
     pub entity: Entity,
@@ -39,8 +24,17 @@ pub struct JumpEvent {
 #[derive(Event)]
 pub struct FireEvent {
     pub entity: Entity,
-    pub origin: Vector3<f32>,
+    pub cam_origin: Point3<f32>,
     pub direction: Vector3<f32>,
+    pub barrel_origin: Point3<f32>,
+}
+
+#[derive(Event)]
+pub struct HitEvent {
+    pub hitter_id: String,
+    pub hitten: Entity,
+    pub weapon: String,
+    pub point: Vector3<f32>,
 }
 
 #[derive(Event)]

@@ -5,24 +5,27 @@ use std::{
 
 use bevy_ecs::{
     event::Events,
-    system::{Commands, Resource},
+    system::{Commands, ResMut, Resource},
 };
 use rapier3d::{
-    control::{CharacterLength, KinematicCharacterController},
+    control::{CharacterAutostep, CharacterLength, KinematicCharacterController},
+    na::Vector3,
     prelude::*,
 };
+use serde::Serialize;
 
 use crate::{
     ecs::{
-        components::PlayerLookup,
+        components::{ColliderHandleLookup, PlayerLookup},
         events::{
-            ConnectEvent, DisconnectEvent, FireEvent, JumpEvent, LookEvent, MoveEvent,
-            PositionChangeEvent, RotationChangeEvent,
+            ConnectEvent, DisconnectEvent, FireEvent, HitEvent, JumpEvent, LookEvent, MoveEvent,
         },
         systems::physics::PhysicsResources,
     },
     server::{
+        channel::DefaultChannel,
         connection::ConnectionConfig,
+        message_out::MessageOut,
         server::MattaServer,
         transport::{server::server::ServerConfig, transport::ServerTransport},
     },
@@ -45,7 +48,12 @@ pub fn setup(mut commands: Commands) {
 
     let mut character_controller = KinematicCharacterController::default();
     character_controller.offset = CharacterLength::Absolute(0.01);
-    character_controller.snap_to_ground = Some(CharacterLength::Absolute(0.5));
+    character_controller.snap_to_ground = Some(CharacterLength::Absolute(0.05));
+    character_controller.autostep = Some(CharacterAutostep {
+        max_height: CharacterLength::Absolute(0.05),
+        min_width: CharacterLength::Absolute(0.2),
+        include_dynamic_bodies: false,
+    });
 
     let physics_res = PhysicsResources {
         gravity: vector![0.0, -9.81, 0.0],
@@ -63,11 +71,17 @@ pub fn setup(mut commands: Commands) {
         character_controller,
     };
 
+    let objects: Vec<LevelObject> = vec![];
+
+    let level_objects = LevelObjects { objects };
+
     commands.insert_resource(server);
     commands.insert_resource(transport);
     commands.insert_resource(PlayerLookup::new());
+    commands.insert_resource(ColliderHandleLookup::new());
     commands.insert_resource(duration);
     commands.insert_resource(physics_res);
+    commands.insert_resource(level_objects);
 
     commands.insert_resource(Events::<ConnectEvent>::default());
     commands.insert_resource(Events::<DisconnectEvent>::default());
@@ -75,8 +89,157 @@ pub fn setup(mut commands: Commands) {
     commands.insert_resource(Events::<LookEvent>::default());
     commands.insert_resource(Events::<JumpEvent>::default());
     commands.insert_resource(Events::<FireEvent>::default());
-    commands.insert_resource(Events::<RotationChangeEvent>::default());
-    commands.insert_resource(Events::<PositionChangeEvent>::default());
+    commands.insert_resource(Events::<HitEvent>::default());
+}
+
+pub fn setup_level(
+    mut physics_res: ResMut<PhysicsResources>,
+    mut level_objects: ResMut<LevelObjects>,
+) {
+    let PhysicsResources {
+        rigid_body_set,
+        collider_set,
+        ..
+    } = &mut *physics_res;
+
+    let terrain_translation = vector![500.0, 0.0, 500.0];
+    let terrain_rigid_body = RigidBodyBuilder::new(RigidBodyType::Fixed)
+        // The rigid body translation.
+        // Default: zero vector.
+        .translation(terrain_translation)
+        // All done, actually build the rigid-body.
+        .build();
+    let terrain_size = vector![500.0, 0.1, 500.0];
+    let terrain_collider = ColliderBuilder::cuboid(terrain_size.x, terrain_size.y, terrain_size.z)
+        // .active_collision_types(
+        //     ActiveCollisionTypes::default() | ActiveCollisionTypes::KINEMATIC_FIXED,
+        // )
+        .build();
+
+    let terrain_rigid_body_handle = rigid_body_set.insert(terrain_rigid_body);
+
+    let _terrain_collider_handle = collider_set.insert_with_parent(
+        terrain_collider,
+        terrain_rigid_body_handle,
+        rigid_body_set,
+    );
+
+    let cube_translation = vector![5.0, 0.5, 5.0];
+    let cube_rigid_body = RigidBodyBuilder::new(RigidBodyType::Fixed)
+        // The rigid body translation.
+        // Default: zero vector.
+        .translation(cube_translation)
+        // All done, actually build the rigid-body.
+        .build();
+    let cube_size = vector![100.0, 0.5, 100.0];
+    let cube_collider = ColliderBuilder::cuboid(cube_size.x, cube_size.y, cube_size.z)
+        // .active_collision_types(
+        //     ActiveCollisionTypes::default() | ActiveCollisionTypes::KINEMATIC_FIXED,
+        // )
+        .build();
+
+    let cube_rigid_body_handle = rigid_body_set.insert(cube_rigid_body);
+
+    let _cube_collider_handle =
+        collider_set.insert_with_parent(cube_collider, cube_rigid_body_handle, rigid_body_set);
+
+    let cube2_translation = vector![10.0, 5.0, 10.0];
+    let cube2_rigid_body = RigidBodyBuilder::new(RigidBodyType::Fixed)
+        // The rigid body translation.
+        // Default: zero vector.
+        .translation(cube2_translation)
+        // All done, actually build the rigid-body.
+        .build();
+    let cube2_size = vector![10.0, 5.0, 3.0];
+    let cube2_collider =
+        ColliderBuilder::cuboid(cube2_size.x / 2.0, cube2_size.y / 2.0, cube2_size.z / 2.0)
+            // .active_collision_types(
+            //     ActiveCollisionTypes::default() | ActiveCollisionTypes::KINEMATIC_FIXED,
+            // )
+            .build();
+
+    let cube2_rigid_body_handle = rigid_body_set.insert(cube2_rigid_body);
+
+    let _cube2_collider_handle =
+        collider_set.insert_with_parent(cube2_collider, cube2_rigid_body_handle, rigid_body_set);
+
+    let player_translation = vector![5.0, 3.0, 5.0];
+    let player_rigid_body = RigidBodyBuilder::new(RigidBodyType::Fixed)
+        // The rigid body translation.
+        // Default: zero vector.
+        .translation(player_translation)
+        // All done, actually build the rigid-body.
+        .build();
+    let player_size = vector![1.0, 1.0, 1.0];
+    let player_collider = ColliderBuilder::capsule_y(player_size.x / 2.0, player_size.y / 2.0)
+        // .active_collision_types(
+        //     ActiveCollisionTypes::default() | ActiveCollisionTypes::KINEMATIC_FIXED,
+        // )
+        .build();
+
+    let player_rigid_body_handle = rigid_body_set.insert(player_rigid_body);
+
+    let _player_collider_handle =
+        collider_set.insert_with_parent(player_collider, player_rigid_body_handle, rigid_body_set);
+
+    let terrain_level_object = LevelObject {
+        object_type: 1,
+        translation: terrain_translation,
+        size: terrain_size,
+    };
+
+    let cube_level_object = LevelObject {
+        object_type: 1,
+        translation: cube_translation,
+        size: cube_size,
+    };
+
+    let cube2_level_object = LevelObject {
+        object_type: 1,
+        translation: cube2_translation,
+        size: cube2_size,
+    };
+
+    let player_level_object = LevelObject {
+        object_type: 2,
+        translation: player_translation,
+        size: player_size,
+    };
+
+    level_objects.objects.push(terrain_level_object);
+    level_objects.objects.push(cube_level_object);
+    level_objects.objects.push(cube2_level_object);
+    level_objects.objects.push(player_level_object);
+}
+
+pub fn send_level_objects(
+    server: &mut MattaServer,
+    level_objects: &LevelObjects,
+    player_id: String,
+) {
+    let level_objects_message =
+        MessageOut::level_objects_message(level_objects.objects.clone()).unwrap();
+
+    let client_id = server.client_id_by_player_id(player_id).unwrap();
+
+    server.send_message(
+        client_id,
+        DefaultChannel::ReliableOrdered,
+        level_objects_message.data,
+    )
+}
+
+#[derive(Debug, Resource, Serialize)]
+pub struct LevelObjects {
+    objects: Vec<LevelObject>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct LevelObject {
+    // Ball: 0, Cube: 1, Capsule: 2
+    object_type: u8,
+    translation: Vector3<f32>,
+    size: Vector3<f32>,
 }
 
 #[derive(Resource)]

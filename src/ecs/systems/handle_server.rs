@@ -9,18 +9,26 @@ use bevy_ecs::{
 use crate::{
     ecs::{
         components::PlayerLookup,
-        events::{ConnectEvent, DisconnectEvent, LookEvent, MoveEvent},
-        systems::send_events::{send_disconnect_event, send_look_event, send_move_event},
+        events::{ConnectEvent, DisconnectEvent, FireEvent, JumpEvent, LookEvent, MoveEvent},
+        systems::send_events::{
+            send_disconnect_event, send_fire_event, send_look_event, send_move_event,
+        },
     },
     server::{
         channel::DefaultChannel,
-        message_in::{digest_move_message, digest_rotation_message, MessageIn, MessageInType},
+        message_in::{
+            digest_fire_message, digest_move_message, digest_rotation_message, MessageIn,
+            MessageInType,
+        },
         server::{MattaServer, ServerEvent},
         transport::transport::ServerTransport,
     },
 };
 
-use super::{send_events::send_connect_event, setup::DurationResource};
+use super::{
+    send_events::{send_connect_event, send_jump_event},
+    setup::DurationResource,
+};
 
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
 pub struct HandleServer;
@@ -59,7 +67,8 @@ pub fn handle_server_messages(
     mut connect_event: EventWriter<ConnectEvent>,
     mut move_event: EventWriter<MoveEvent>,
     mut look_event: EventWriter<LookEvent>,
-    // mut jump_event: EventWriter<JumpEvent>,
+    mut jump_event: EventWriter<JumpEvent>,
+    mut fire_event: EventWriter<FireEvent>,
 ) {
     // Receive message from channel
 
@@ -74,13 +83,13 @@ pub fn handle_server_messages(
                     let rotation = digest_rotation_message(event_in.data).unwrap();
                     send_look_event(
                         player_id,
-                        0.0,
-                        rotation,
-                        0.0,
+                        rotation.x,
+                        rotation.y,
+                        rotation.z,
+                        rotation.w,
                         &player_lookup,
                         &mut look_event,
                     );
-                    tracing::trace!("Rotation Message Received: {:?}", rotation);
                 }
                 MessageInType::Move => {
                     let move_event_in = digest_move_message(event_in.data).unwrap();
@@ -91,8 +100,23 @@ pub fn handle_server_messages(
                         &player_lookup,
                         &mut move_event,
                     );
-                    tracing::trace!("Move Message Received: {:?}", move_event_in);
                 }
+                MessageInType::Fire => {
+                    let fire_event_in = digest_fire_message(event_in.data).unwrap();
+                    send_fire_event(
+                        player_id,
+                        fire_event_in.cam_origin,
+                        fire_event_in.direction,
+                        fire_event_in.barrel_origin,
+                        &player_lookup,
+                        &mut fire_event,
+                    );
+                }
+
+                MessageInType::Jump => {
+                    send_jump_event(player_id, &player_lookup, &mut jump_event);
+                }
+
                 MessageInType::Connect => {
                     send_connect_event(player_id, &mut connect_event);
                 }

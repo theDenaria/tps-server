@@ -1,6 +1,8 @@
 use bincode;
-use rapier3d::na::Vector3;
+use rapier3d::na::{UnitQuaternion, Vector3, Vector4};
 use serde::{Deserialize, Serialize};
+
+use crate::ecs::systems::setup::LevelObject;
 
 #[derive(Debug)]
 pub struct MessageOut {
@@ -35,7 +37,6 @@ impl MessageOut {
             let position_event = PositionMessageOut {
                 positions: position_details,
             };
-            tracing::info!("{:?}", position_event);
 
             let mut serialized = bincode::serialize(&position_event).unwrap();
             serialized.insert(0, 1); // Position Event Type 1
@@ -47,21 +48,20 @@ impl MessageOut {
         None
     }
 
-    pub fn rotation_message(rotations: Vec<(Vector3<f32>, String)>) -> Option<MessageOut> {
+    pub fn rotation_message(rotations: Vec<(UnitQuaternion<f32>, String)>) -> Option<MessageOut> {
         let rotations: Vec<RotationDetails> = rotations
             .iter()
             .map(|(rotation, player_id)| {
                 let player_id_bytes = normalize_player_id(player_id.as_str());
                 RotationDetails {
                     player_id: player_id_bytes,
-                    rotation: *rotation,
+                    rotation: Vector4::new(rotation.i, rotation.j, rotation.k, rotation.w),
                 }
             })
             .collect();
 
         if rotations.len() > 0 {
             let rotation_event = RotationMessageOut { rotations };
-            tracing::info!("{:?}", rotation_event);
 
             let mut serialized = bincode::serialize(&rotation_event).unwrap();
             serialized.insert(0, 2); // Rotation Event Type 1
@@ -98,6 +98,77 @@ impl MessageOut {
             data: serialized,
         })
     }
+
+    pub fn level_objects_message(level_objects: Vec<LevelObject>) -> Option<MessageOut> {
+        if level_objects.len() > 0 {
+            tracing::info!("{:?}", level_objects);
+            let mut serialized = bincode::serialize(&level_objects).unwrap();
+            serialized.insert(0, 0); // Level Object Message Type 0
+            return Some(MessageOut {
+                event_type: MessageOutType::LevelObjects,
+                data: serialized,
+            });
+        }
+        None
+    }
+
+    pub fn fire_message(
+        player_id: String,
+        origin: Vector3<f32>,
+        direction: Vector3<f32>,
+    ) -> MessageOut {
+        let fire_details: FireDetails = FireDetails {
+            player_id: normalize_player_id(player_id.as_str()),
+            origin,
+            direction,
+        };
+
+        tracing::info!("{:?}", fire_details);
+
+        let mut serialized = bincode::serialize(&fire_details).unwrap();
+        serialized.insert(0, 3); // Fire Message Type 3
+        MessageOut {
+            event_type: MessageOutType::Fire,
+            data: serialized,
+        }
+    }
+
+    pub fn hit_message(player_id: String, target_id: String, point: Vector3<f32>) -> MessageOut {
+        let hit_details: HitDetails = HitDetails {
+            player_id: normalize_player_id(player_id.as_str()),
+            target_id: normalize_player_id(target_id.as_str()),
+            point,
+        };
+
+        tracing::info!("{:?}", hit_details);
+
+        let mut serialized = bincode::serialize(&hit_details).unwrap();
+        serialized.insert(0, 4); // Hit Message Type 4
+        MessageOut {
+            event_type: MessageOutType::Hit,
+            data: serialized,
+        }
+    }
+
+    pub fn health_message(healths: Vec<(String, f32)>) -> MessageOut {
+        let health_details: Vec<HealthDetails> = healths
+            .iter()
+            .map(|(player_id, health)| {
+                let player_id_bytes = normalize_player_id(player_id.as_str());
+                HealthDetails {
+                    player_id: player_id_bytes,
+                    health: *health,
+                }
+            })
+            .collect();
+
+        let mut serialized = bincode::serialize(&health_details).unwrap();
+        serialized.insert(0, 6); // Health Message Type 6
+        MessageOut {
+            event_type: MessageOutType::Health,
+            data: serialized,
+        }
+    }
 }
 
 fn normalize_player_id(player_id: &str) -> [u8; 16] {
@@ -110,8 +181,12 @@ fn normalize_player_id(player_id: &str) -> [u8; 16] {
 
 #[derive(Debug)]
 pub enum MessageOutType {
+    LevelObjects = 0,
     Position = 1,
     Rotation = 2,
+    Fire = 3,
+    Hit = 4,
+    Health = 6,
     Disconnect = 10,
 }
 
@@ -133,7 +208,27 @@ struct RotationMessageOut {
 #[derive(Serialize, Deserialize, Debug)]
 struct RotationDetails {
     player_id: [u8; 16],
-    rotation: Vector3<f32>,
+    rotation: Vector4<f32>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct FireDetails {
+    player_id: [u8; 16],
+    origin: Vector3<f32>,
+    direction: Vector3<f32>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct HitDetails {
+    player_id: [u8; 16],
+    target_id: [u8; 16],
+    point: Vector3<f32>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct HealthDetails {
+    player_id: [u8; 16],
+    health: f32,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
