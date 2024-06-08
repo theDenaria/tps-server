@@ -1,8 +1,6 @@
 use std::io::{self, Cursor, Write};
 
-use crate::transport::server::error::TransportServerError;
-
-use super::serialize::*;
+use super::{error::TransportServerError, serialize::*};
 
 #[derive(Debug)]
 #[repr(u8)]

@@ -1,14 +1,15 @@
-use crate::connection::{ConnectionConfig, NetworkInfo, UnityClient};
-use crate::error::{ClientNotFound, DisconnectReason};
-use crate::packet::Payload;
 use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
 
+use bevy_ecs::system::Resource;
 use bytes::Bytes;
+
+use super::connection::{ConnectionConfig, NetworkInfo, UnityClient};
+use super::error::{ClientNotFound, DisconnectReason};
+use super::packet::Payload;
 
 /// Connection and disconnection events in the server.
 #[derive(Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "bevy", derive(bevy_ecs::prelude::Event))]
 pub enum ServerEvent {
     ClientConnected {
         client_id: ClientId,
@@ -20,9 +21,10 @@ pub enum ServerEvent {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Resource)]
 pub struct MattaServer {
     connections: HashMap<ClientId, UnityClient>,
+    player_connection_map: HashMap<String, ClientId>,
     connection_config: ConnectionConfig,
     events: VecDeque<ServerEvent>,
 }
@@ -31,6 +33,7 @@ impl MattaServer {
     pub fn new(connection_config: ConnectionConfig) -> Self {
         Self {
             connections: HashMap::new(),
+            player_connection_map: HashMap::new(),
             connection_config,
             events: VecDeque::new(),
         }
@@ -47,8 +50,10 @@ impl MattaServer {
 
         let mut connection = UnityClient::new_from_server(self.connection_config.clone());
         // Consider newly added connections as connected
-        connection.set_connected(player_id);
+        connection.set_connected(player_id.clone());
         self.connections.insert(client_id, connection);
+        self.player_connection_map
+            .insert(player_id.clone(), client_id);
         self.events
             .push_back(ServerEvent::ClientConnected { client_id })
     }
@@ -112,9 +117,15 @@ impl MattaServer {
     }
 
     pub fn player_id(&self, client_id: ClientId) -> Result<&String, ClientNotFound> {
-        tracing::trace!("TYING TO GET PLAYERID");
         match self.connections.get(&client_id) {
             Some(connection) => Ok(connection.player_id()),
+            None => Err(ClientNotFound),
+        }
+    }
+
+    pub fn client_id_by_player_id(&self, player_id: String) -> Result<ClientId, ClientNotFound> {
+        match self.player_connection_map.get(&player_id) {
+            Some(client_id) => Ok(*client_id),
             None => Err(ClientNotFound),
         }
     }

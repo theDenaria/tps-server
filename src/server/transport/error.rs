@@ -1,5 +1,6 @@
-use crate::error::DisconnectReason;
 use std::{error::Error, fmt};
+
+use crate::server::error::DisconnectReason;
 
 use super::server::error::TransportServerError;
 

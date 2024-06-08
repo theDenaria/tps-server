@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::packet::SerializationError;
+use super::packet::SerializationError;
 
 /// Possible reasons for a disconnection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

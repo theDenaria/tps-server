@@ -1,13 +1,14 @@
-use crate::channel::reliable::{ReceiveChannelReliable, SendChannelReliable};
-use crate::channel::unreliable::{ReceiveChannelUnreliable, SendChannelUnreliable};
-use crate::channel::{ChannelConfig, DefaultChannel, SendType};
-use crate::connection_stats::ConnectionStats;
-use crate::error::DisconnectReason;
-use crate::packet::{Packet, Payload};
 use bytes::Bytes;
 
 use std::collections::{BTreeMap, VecDeque};
 use std::time::{Duration, Instant};
+
+use super::channel::reliable::{ReceiveChannelReliable, SendChannelReliable};
+use super::channel::unreliable::{ReceiveChannelUnreliable, SendChannelUnreliable};
+use super::channel::{ChannelConfig, DefaultChannel, SendType};
+use super::connection_stats::ConnectionStats;
+use super::error::DisconnectReason;
+use super::packet::{Packet, Payload};
 
 #[derive(Debug, Clone)]
 pub struct ConnectionConfig {
@@ -258,7 +259,6 @@ impl UnityClient {
     }
 
     pub fn player_id(&self) -> &String {
-        tracing::trace!("Player_id: {:?}", &self.player_id);
         &self.player_id
     }
 

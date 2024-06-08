@@ -1,6 +1,6 @@
 use std::{error, fmt, io};
 
-use crate::{constants::TRANSPORT_MAX_PAYLOAD_BYTES, error::DisconnectReason};
+use crate::{constants::TRANSPORT_MAX_PAYLOAD_BYTES, server::error::DisconnectReason};
 
 #[derive(Debug)]
 pub enum TransportServerError {
