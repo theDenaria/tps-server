@@ -52,6 +52,7 @@ pub fn on_health_change(
         healths.push((player.id.clone(), health.0));
     }
     if healths.len() > 0 {
+        tracing::info!("Sending health messages: {:?}", healths);
         let health_message = MessageOut::health_message(healths);
         server.broadcast_message(DefaultChannel::ReliableOrdered, health_message.data);
     }
