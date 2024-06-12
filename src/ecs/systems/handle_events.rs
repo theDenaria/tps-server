@@ -101,10 +101,6 @@ pub fn handle_look_events(
             let rot_quaternion = UnitQuaternion::from_quaternion(quaternion_data);
 
             rigid_body.set_next_kinematic_rotation(rot_quaternion);
-
-            let new_rotation = rigid_body.rotation();
-
-            let (euler_x, euler_y, euler_z) = new_rotation.euler_angles();
         }
     }
 }
@@ -154,6 +150,7 @@ pub fn handle_fire_events(
                 QueryFilter::default().exclude_collider(player_physics.collider_handle),
             ) {
                 let initial_hit_point = camera_ray.point_at(initial_toi);
+                tracing::info!("Initial hit point: {:?}", initial_hit_point);
 
                 // Second raycast from the barrel position to the initial hit point
                 let barrel_target_dir = (initial_hit_point - event.barrel_origin).normalize();
@@ -171,6 +168,8 @@ pub fn handle_fire_events(
                 // Define the angle threshold
                 let angle_threshold = 70.0;
 
+                tracing::info!("Angle: {:?}, Threshold: {:?}", angle, angle_threshold);
+
                 if angle <= angle_threshold {
                     let barrel_ray = Ray::new(event.barrel_origin, barrel_target_dir.clone());
                     if let Some((handle, toi)) = query_pipeline.cast_ray(
@@ -182,7 +181,7 @@ pub fn handle_fire_events(
                         QueryFilter::default().exclude_collider(player_physics.collider_handle),
                     ) {
                         let hit_point = barrel_ray.point_at(toi);
-
+                        tracing::info!("Main target or an obstacle hit");
                         if let Some(hit_entity) = collider_lookup.map.get(&handle) {
                             hit_event.send(HitEvent {
                                 hitter_id: player.id.clone(),
@@ -203,6 +202,7 @@ pub fn handle_fire_events(
                 } else {
                     // No obstacle between the barrel and the target, so use the initial hit point
                     if let Some(hit_entity) = collider_lookup.map.get(&initial_handle) {
+                        tracing::info!("Main target threshold misses");
                         hit_event.send(HitEvent {
                             hitter_id: player.id.clone(),
                             hitten: *hit_entity,
@@ -219,6 +219,7 @@ pub fn handle_fire_events(
                     server.broadcast_message(DefaultChannel::ReliableOrdered, fire_message.data);
                 }
             } else {
+                tracing::info!("No hit fire");
                 let fire_message = MessageOut::fire_message(
                     player.id.clone(),
                     event.barrel_origin.coords,
@@ -226,6 +227,7 @@ pub fn handle_fire_events(
                 );
                 server.broadcast_message(DefaultChannel::ReliableOrdered, fire_message.data);
             }
+            tracing::info!("Always come here");
         }
     }
 }
@@ -236,8 +238,10 @@ pub fn handle_hit_events(
     mut server: ResMut<MattaServer>,
 ) {
     for event in hit_events.read() {
+        tracing::info!("Hit event {:?}", event);
         if let Ok((player, mut health)) = query.get_mut(event.hitten) {
-            health.0 -= 20.0;
+            tracing::info!("Hit Happened!!");
+            health.0 = (health.0 - 20.0).max(0.0);
             let hit_message =
                 MessageOut::hit_message(event.hitter_id.clone(), player.id.clone(), event.point);
             server.broadcast_message(DefaultChannel::ReliableOrdered, hit_message.data);

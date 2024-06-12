@@ -1,6 +1,6 @@
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket},
-    time::{Duration, SystemTime},
+    time::{Duration, Instant, SystemTime},
 };
 
 use bevy_ecs::{
@@ -44,7 +44,7 @@ pub fn setup(mut commands: Commands) {
         public_addresses: vec![SERVER_ADDR],
     };
     let transport = ServerTransport::new(server_config, socket).unwrap();
-    let duration = DurationResource::default();
+    let instant = InstantResource::default();
 
     let mut character_controller = KinematicCharacterController::default();
     character_controller.offset = CharacterLength::Absolute(0.01);
@@ -79,7 +79,7 @@ pub fn setup(mut commands: Commands) {
     commands.insert_resource(transport);
     commands.insert_resource(PlayerLookup::new());
     commands.insert_resource(ColliderHandleLookup::new());
-    commands.insert_resource(duration);
+    commands.insert_resource(instant);
     commands.insert_resource(physics_res);
     commands.insert_resource(level_objects);
 
@@ -124,7 +124,7 @@ pub fn setup_level(
         rigid_body_set,
     );
 
-    let cube_translation = vector![5.0, 0.5, 5.0];
+    let cube_translation = vector![100.0, 0.5, 100.0];
     let cube_rigid_body = RigidBodyBuilder::new(RigidBodyType::Fixed)
         // The rigid body translation.
         // Default: zero vector.
@@ -143,7 +143,7 @@ pub fn setup_level(
     let _cube_collider_handle =
         collider_set.insert_with_parent(cube_collider, cube_rigid_body_handle, rigid_body_set);
 
-    let cube2_translation = vector![10.0, 5.0, 10.0];
+    let cube2_translation = vector![10.0, 5.0, 30.0];
     let cube2_rigid_body = RigidBodyBuilder::new(RigidBodyType::Fixed)
         // The rigid body translation.
         // Default: zero vector.
@@ -163,7 +163,7 @@ pub fn setup_level(
     let _cube2_collider_handle =
         collider_set.insert_with_parent(cube2_collider, cube2_rigid_body_handle, rigid_body_set);
 
-    let player_translation = vector![5.0, 3.0, 5.0];
+    let player_translation = vector![5.0, 3.0, 25.0];
     let player_rigid_body = RigidBodyBuilder::new(RigidBodyType::Fixed)
         // The rigid body translation.
         // Default: zero vector.
@@ -210,6 +210,64 @@ pub fn setup_level(
     level_objects.objects.push(cube_level_object);
     level_objects.objects.push(cube2_level_object);
     level_objects.objects.push(player_level_object);
+
+    let map_width = 200.0;
+    let map_height = 200.0;
+    let wall_height = 50.0;
+    let wall_thickness = 1.0;
+    let rotation_degrees: f32 = 45.0; // Example rotation
+
+    // Convert degrees to radians
+    let rotation_radians = rotation_degrees.to_radians();
+
+    let map_edges = vec![
+        MapEdge {
+            // front
+            position: Vector3::new(map_width / 2.0, wall_height / 2.0, 0.0),
+            scale: Vector3::new(map_width, wall_height, wall_thickness),
+        },
+        MapEdge {
+            // left
+            position: Vector3::new(0.0, wall_height / 2.0, map_height / 2.0),
+            scale: Vector3::new(wall_thickness, wall_height, map_height),
+        },
+        MapEdge {
+            // back
+            position: Vector3::new(map_width / 2.0, wall_height / 2.0, map_height),
+            scale: Vector3::new(map_width, wall_height, wall_thickness),
+        },
+        MapEdge {
+            // right
+            position: Vector3::new(map_width, wall_height / 2.0, map_height / 2.0),
+            scale: Vector3::new(wall_thickness, wall_height, map_height),
+        },
+        MapEdge {
+            // ceiling
+            position: Vector3::new(map_width / 2.0, wall_height, map_height / 2.0),
+            scale: Vector3::new(map_width, wall_thickness, map_height),
+        },
+        MapEdge {
+            // ground
+            position: Vector3::new(map_width / 2.0, 0.0, map_height / 2.0),
+            scale: Vector3::new(map_width, wall_thickness, map_height),
+        },
+    ];
+
+    for edge in &map_edges {
+        let wall_shape =
+            ColliderBuilder::cuboid(edge.scale.x / 2.0, edge.scale.y / 2.0, edge.scale.z / 2.0)
+                .translation(edge.position)
+                .build();
+        collider_set.insert(wall_shape);
+
+        let edge_level_object = LevelObject {
+            object_type: 9,
+            translation: edge.position,
+            size: edge.scale,
+        };
+
+        level_objects.objects.push(edge_level_object);
+    }
 }
 
 pub fn send_level_objects(
@@ -243,10 +301,24 @@ pub struct LevelObject {
 }
 
 #[derive(Resource)]
-pub struct DurationResource(pub Duration);
+pub struct InstantResource(pub Instant);
 
-impl Default for DurationResource {
+impl Default for InstantResource {
     fn default() -> Self {
-        DurationResource(Duration::default())
+        InstantResource(Instant::now())
     }
+}
+
+struct MapEdgesPositions {
+    front: Vector3<f32>,
+    left: Vector3<f32>,
+    back: Vector3<f32>,
+    right: Vector3<f32>,
+    ceiling: Vector3<f32>,
+    ground: Vector3<f32>,
+}
+
+struct MapEdge {
+    position: Vector3<f32>,
+    scale: Vector3<f32>,
 }

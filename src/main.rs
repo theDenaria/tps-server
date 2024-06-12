@@ -7,8 +7,8 @@ mod server;
 
 use ecs::systems::{
     handle_events::{
-        handle_connect_events, handle_disconnect_events, handle_fire_events, handle_jump_events,
-        handle_look_events, handle_move_events, HandleGameEvents,
+        handle_connect_events, handle_disconnect_events, handle_fire_events, handle_hit_events,
+        handle_jump_events, handle_look_events, handle_move_events, HandleGameEvents,
     },
     handle_server::{
         handle_server_events, handle_server_messages, transport_send_packets, HandleServer,
@@ -56,13 +56,14 @@ fn start_server() -> Result<(), TransportError> {
             handle_move_events,
             handle_look_events,
             handle_fire_events,
+            handle_hit_events,
             handle_jump_events,
             handle_connect_events,
             handle_disconnect_events,
         )
             .in_set(HandleGameEvents)
             .after(HandleServer),
-        (physics_step, handle_air_movement, update_physic_components)
+        (handle_air_movement, physics_step, update_physic_components)
             .chain()
             .in_set(Physics)
             .after(HandleGameEvents),

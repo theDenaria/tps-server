@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use bevy_ecs::{
     event::EventWriter,
@@ -7,6 +7,7 @@ use bevy_ecs::{
 };
 
 use crate::{
+    constants::TICK_DELTA,
     ecs::{
         components::PlayerLookup,
         events::{ConnectEvent, DisconnectEvent, FireEvent, JumpEvent, LookEvent, MoveEvent},
@@ -27,7 +28,7 @@ use crate::{
 
 use super::{
     send_events::{send_connect_event, send_jump_event},
-    setup::DurationResource,
+    setup::InstantResource,
 };
 
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
@@ -36,12 +37,10 @@ pub struct HandleServer;
 pub fn handle_server_events(
     mut server: ResMut<MattaServer>,
     mut transport: ResMut<ServerTransport>,
-    mut delta_time: ResMut<DurationResource>,
     mut disconnect_event: EventWriter<DisconnectEvent>,
 ) {
-    delta_time.0 = Duration::from_millis(16);
-    server.update(delta_time.0);
-    transport.update(delta_time.0, &mut server).unwrap();
+    server.update(TICK_DELTA);
+    transport.update(TICK_DELTA, &mut server).unwrap();
 
     // Check for client connections/disconnections
     while let Some(event) = server.get_event() {
@@ -134,8 +133,20 @@ pub struct SendPackets;
 pub fn transport_send_packets(
     mut server: ResMut<MattaServer>,
     mut transport: ResMut<ServerTransport>,
-    delta_time: Res<DurationResource>,
+    mut timestamp: ResMut<InstantResource>,
 ) {
+    let elapsed_time = timestamp.0.elapsed();
+    if elapsed_time < TICK_DELTA {
+        let sleep_duration = TICK_DELTA - elapsed_time;
+        std::thread::sleep(sleep_duration);
+        timestamp.0 = Instant::now();
+    } else {
+        timestamp.0 = Instant::now();
+        tracing::warn!(
+            "Warning: Tick duration exceeded target! Elapsed: {:?}",
+            elapsed_time
+        );
+    }
+
     transport.send_packets(&mut server);
-    std::thread::sleep(delta_time.0); // Running at 60hz
 }

@@ -10,3 +10,5 @@ pub const MAX_MESSAGES_LENGTH: usize = 1200;
 pub const TRANSPORT_SEND_RATE: Duration = Duration::from_millis(250);
 
 pub static VELOCITY_MUL: f32 = 5.0;
+
+pub static TICK_DELTA: Duration = Duration::from_millis(16);
