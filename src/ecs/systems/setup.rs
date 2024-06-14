@@ -1,6 +1,6 @@
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket},
-    time::{Duration, Instant, SystemTime},
+    time::{Instant, SystemTime},
 };
 
 use bevy_ecs::{
@@ -215,10 +215,6 @@ pub fn setup_level(
     let map_height = 200.0;
     let wall_height = 50.0;
     let wall_thickness = 1.0;
-    let rotation_degrees: f32 = 45.0; // Example rotation
-
-    // Convert degrees to radians
-    let rotation_radians = rotation_degrees.to_radians();
 
     let map_edges = vec![
         MapEdge {
