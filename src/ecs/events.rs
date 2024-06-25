@@ -29,7 +29,7 @@ pub struct FireEvent {
     pub barrel_origin: Point3<f32>,
 }
 
-#[derive(Event)]
+#[derive(Event, Debug)]
 pub struct HitEvent {
     pub hitter_id: String,
     pub hitten: Entity,
