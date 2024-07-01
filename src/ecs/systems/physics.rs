@@ -69,7 +69,7 @@ pub fn physics_step(mut resources: ResMut<PhysicsResources>) {
         &(),
         &(),
     );
-    query_pipeline.update(rigid_body_set, collider_set);
+    // query_pipeline.update(rigid_body_set, collider_set);
 }
 
 pub fn handle_air_movement(

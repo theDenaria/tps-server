@@ -1,6 +1,7 @@
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket},
     time::{Instant, SystemTime},
+    vec,
 };
 
 use bevy_ecs::{
@@ -102,168 +103,58 @@ pub fn setup_level(
         ..
     } = &mut *physics_res;
 
-    let terrain_translation = vector![500.0, 0.0, 500.0];
-    let terrain_rigid_body = RigidBodyBuilder::new(RigidBodyType::Fixed)
-        // The rigid body translation.
-        // Default: zero vector.
-        .translation(terrain_translation)
-        // All done, actually build the rigid-body.
-        .build();
-    let terrain_size = vector![500.0, 0.1, 500.0];
-    let terrain_collider = ColliderBuilder::cuboid(terrain_size.x, terrain_size.y, terrain_size.z)
-        // .active_collision_types(
-        //     ActiveCollisionTypes::default() | ActiveCollisionTypes::KINEMATIC_FIXED,
-        // )
-        .build();
-
-    let terrain_rigid_body_handle = rigid_body_set.insert(terrain_rigid_body);
-
-    let _terrain_collider_handle = collider_set.insert_with_parent(
-        terrain_collider,
-        terrain_rigid_body_handle,
+    let terrain_object = LevelObject::new_cuboid(
         rigid_body_set,
+        collider_set,
+        vector![500.0, 0.1, 500.0],
+        vector![500.0, 0.0, 500.0],
+        LevelObjectColor::Gray,
     );
 
-    let cube_translation = vector![100.0, 0.5, 100.0];
-    let cube_rigid_body = RigidBodyBuilder::new(RigidBodyType::Fixed)
-        // The rigid body translation.
-        // Default: zero vector.
-        .translation(cube_translation)
-        // All done, actually build the rigid-body.
-        .build();
-    let cube_size = vector![100.0, 0.5, 100.0];
-    let cube_collider = ColliderBuilder::cuboid(cube_size.x, cube_size.y, cube_size.z)
-        // .active_collision_types(
-        //     ActiveCollisionTypes::default() | ActiveCollisionTypes::KINEMATIC_FIXED,
-        // )
-        .build();
+    let cube_object = LevelObject::new_cuboid(
+        rigid_body_set,
+        collider_set,
+        vector![100.0, 0.5, 100.0],
+        vector![100.0, 0.5, 100.0],
+        LevelObjectColor::Green,
+    );
 
-    let cube_rigid_body_handle = rigid_body_set.insert(cube_rigid_body);
+    let cube2_object = LevelObject::new_cuboid(
+        rigid_body_set,
+        collider_set,
+        vector![10.0, 5.0, 3.0],
+        vector![10.0, 5.0, 30.0],
+        LevelObjectColor::Red,
+    );
 
-    let _cube_collider_handle =
-        collider_set.insert_with_parent(cube_collider, cube_rigid_body_handle, rigid_body_set);
+    let player_object = LevelObject::new_capsule(
+        rigid_body_set,
+        collider_set,
+        vector![1.0, 1.0, 1.0],
+        vector![5.0, 3.0, 25.0],
+        LevelObjectColor::Blue,
+    );
 
-    let cube2_translation = vector![10.0, 5.0, 30.0];
-    let cube2_rigid_body = RigidBodyBuilder::new(RigidBodyType::Fixed)
-        // The rigid body translation.
-        // Default: zero vector.
-        .translation(cube2_translation)
-        // All done, actually build the rigid-body.
-        .build();
-    let cube2_size = vector![10.0, 5.0, 3.0];
-    let cube2_collider =
-        ColliderBuilder::cuboid(cube2_size.x / 2.0, cube2_size.y / 2.0, cube2_size.z / 2.0)
-            // .active_collision_types(
-            //     ActiveCollisionTypes::default() | ActiveCollisionTypes::KINEMATIC_FIXED,
-            // )
-            .build();
-
-    let cube2_rigid_body_handle = rigid_body_set.insert(cube2_rigid_body);
-
-    let _cube2_collider_handle =
-        collider_set.insert_with_parent(cube2_collider, cube2_rigid_body_handle, rigid_body_set);
-
-    let player_translation = vector![5.0, 3.0, 25.0];
-    let player_rigid_body = RigidBodyBuilder::new(RigidBodyType::Fixed)
-        // The rigid body translation.
-        // Default: zero vector.
-        .translation(player_translation)
-        // All done, actually build the rigid-body.
-        .build();
-    let player_size = vector![1.0, 1.0, 1.0];
-    let player_collider = ColliderBuilder::capsule_y(player_size.x / 2.0, player_size.y / 2.0)
-        // .active_collision_types(
-        //     ActiveCollisionTypes::default() | ActiveCollisionTypes::KINEMATIC_FIXED,
-        // )
-        .build();
-
-    let player_rigid_body_handle = rigid_body_set.insert(player_rigid_body);
-
-    let _player_collider_handle =
-        collider_set.insert_with_parent(player_collider, player_rigid_body_handle, rigid_body_set);
-
-    let terrain_level_object = LevelObject {
-        object_type: 1,
-        translation: terrain_translation,
-        size: terrain_size,
-    };
-
-    let cube_level_object = LevelObject {
-        object_type: 1,
-        translation: cube_translation,
-        size: cube_size,
-    };
-
-    let cube2_level_object = LevelObject {
-        object_type: 1,
-        translation: cube2_translation,
-        size: cube2_size,
-    };
-
-    let player_level_object = LevelObject {
-        object_type: 2,
-        translation: player_translation,
-        size: player_size,
-    };
-
-    level_objects.objects.push(terrain_level_object);
-    level_objects.objects.push(cube_level_object);
-    level_objects.objects.push(cube2_level_object);
-    level_objects.objects.push(player_level_object);
+    level_objects.objects.push(terrain_object);
+    level_objects.objects.push(cube_object);
+    level_objects.objects.push(cube2_object);
+    level_objects.objects.push(player_object);
 
     let map_width = 200.0;
     let map_height = 200.0;
     let wall_height = 50.0;
     let wall_thickness = 1.0;
 
-    let map_edges = vec![
-        MapEdge {
-            // front
-            position: Vector3::new(map_width / 2.0, wall_height / 2.0, 0.0),
-            scale: Vector3::new(map_width, wall_height, wall_thickness),
-        },
-        MapEdge {
-            // left
-            position: Vector3::new(0.0, wall_height / 2.0, map_height / 2.0),
-            scale: Vector3::new(wall_thickness, wall_height, map_height),
-        },
-        MapEdge {
-            // back
-            position: Vector3::new(map_width / 2.0, wall_height / 2.0, map_height),
-            scale: Vector3::new(map_width, wall_height, wall_thickness),
-        },
-        MapEdge {
-            // right
-            position: Vector3::new(map_width, wall_height / 2.0, map_height / 2.0),
-            scale: Vector3::new(wall_thickness, wall_height, map_height),
-        },
-        MapEdge {
-            // ceiling
-            position: Vector3::new(map_width / 2.0, wall_height, map_height / 2.0),
-            scale: Vector3::new(map_width, wall_thickness, map_height),
-        },
-        MapEdge {
-            // ground
-            position: Vector3::new(map_width / 2.0, 0.0, map_height / 2.0),
-            scale: Vector3::new(map_width, wall_thickness, map_height),
-        },
-    ];
+    let edge_objects = LevelObject::new_edges(
+        rigid_body_set,
+        collider_set,
+        map_width,
+        map_height,
+        wall_height,
+        wall_thickness,
+    );
 
-    for edge in &map_edges {
-        let wall_shape =
-            ColliderBuilder::cuboid(edge.scale.x / 2.0, edge.scale.y / 2.0, edge.scale.z / 2.0)
-                .translation(edge.position)
-                .build();
-        collider_set.insert(wall_shape);
-
-        let edge_level_object = LevelObject {
-            object_type: 9,
-            translation: edge.position,
-            size: edge.scale,
-        };
-
-        level_objects.objects.push(edge_level_object);
-    }
+    level_objects.objects.extend(edge_objects);
 }
 
 pub fn send_level_objects(
@@ -288,12 +179,144 @@ pub struct LevelObjects {
     objects: Vec<LevelObject>,
 }
 
+// Level Object size format uses the convention of Unity3D Game Engine's scale
 #[derive(Debug, Serialize, Clone)]
 pub struct LevelObject {
     // Ball: 0, Cube: 1, Capsule: 2
     object_type: u8,
+    color: u8,
     translation: Vector3<f32>,
     size: Vector3<f32>,
+}
+
+impl LevelObject {
+    fn new_cuboid(
+        rigid_body_set: &mut RigidBodySet,
+        collider_set: &mut ColliderSet,
+        size: Vector3<f32>,
+        translation: Vector3<f32>,
+        color: LevelObjectColor,
+    ) -> LevelObject {
+        let rigid_body = RigidBodyBuilder::new(RigidBodyType::Fixed)
+            .translation(translation)
+            .build();
+        let rigid_body_handle = rigid_body_set.insert(rigid_body);
+
+        let collider = ColliderBuilder::cuboid(size.x / 2.0, size.y / 2.0, size.z / 2.0).build();
+
+        let _collider_handle =
+            collider_set.insert_with_parent(collider, rigid_body_handle, rigid_body_set);
+
+        LevelObject {
+            object_type: 1,
+            color: color as u8,
+            translation,
+            size,
+        }
+    }
+
+    fn new_capsule(
+        rigid_body_set: &mut RigidBodySet,
+        collider_set: &mut ColliderSet,
+        size: Vector3<f32>,
+        translation: Vector3<f32>,
+        color: LevelObjectColor,
+    ) -> LevelObject {
+        let rigid_body = RigidBodyBuilder::new(RigidBodyType::Fixed)
+            .translation(translation)
+            .build();
+        let rigid_body_handle = rigid_body_set.insert(rigid_body);
+
+        let collider = ColliderBuilder::capsule_y(size.y / 2.0, size.x / 2.0).build();
+
+        let _collider_handle =
+            collider_set.insert_with_parent(collider, rigid_body_handle, rigid_body_set);
+
+        LevelObject {
+            object_type: 2,
+            color: color as u8,
+            translation,
+            size,
+        }
+    }
+
+    fn new_edges(
+        rigid_body_set: &mut RigidBodySet,
+        collider_set: &mut ColliderSet,
+        map_width: f32,
+        map_height: f32,
+        wall_height: f32,
+        wall_thickness: f32,
+    ) -> Vec<LevelObject> {
+        let front_object = LevelObject::new_cuboid(
+            rigid_body_set,
+            collider_set,
+            vector![map_width, wall_height, wall_thickness],
+            vector![map_width / 2.0, wall_height / 2.0, 0.0],
+            LevelObjectColor::None,
+        );
+
+        let left_object = LevelObject::new_cuboid(
+            rigid_body_set,
+            collider_set,
+            vector![wall_thickness, wall_height, map_height],
+            vector![0.0, wall_height / 2.0, map_height / 2.0],
+            LevelObjectColor::None,
+        );
+
+        let back_object = LevelObject::new_cuboid(
+            rigid_body_set,
+            collider_set,
+            vector![map_width, wall_height, wall_thickness],
+            vector![map_width / 2.0, wall_height / 2.0, map_height],
+            LevelObjectColor::White,
+        );
+
+        let rigth_object = LevelObject::new_cuboid(
+            rigid_body_set,
+            collider_set,
+            vector![wall_thickness, wall_height, map_height],
+            vector![map_width, wall_height / 2.0, map_height / 2.0],
+            LevelObjectColor::White,
+        );
+
+        let ceiling_object = LevelObject::new_cuboid(
+            rigid_body_set,
+            collider_set,
+            vector![map_width, wall_thickness, map_height],
+            vector![map_width / 2.0, wall_height, map_height / 2.0],
+            LevelObjectColor::None,
+        );
+
+        let ground_object = LevelObject::new_cuboid(
+            rigid_body_set,
+            collider_set,
+            vector![map_width, wall_thickness, map_height],
+            vector![map_width / 2.0, 0.0, map_height / 2.0],
+            LevelObjectColor::White,
+        );
+
+        let edges = vec![
+            front_object,
+            left_object,
+            back_object,
+            rigth_object,
+            ceiling_object,
+            ground_object,
+        ];
+        edges
+    }
+}
+
+#[repr(u8)]
+enum LevelObjectColor {
+    None = 0,  // 0
+    Red = 1,   // 1
+    Green = 2, // 2
+    Blue = 3,  // 3
+    White = 4, // 4
+    Black = 5, // 5
+    Gray = 6,  // 6
 }
 
 #[derive(Resource)]
