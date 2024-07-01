@@ -23,9 +23,10 @@ pub fn on_position_change(
     for (player, position) in &query {
         positions.push((position.0, player.id.clone()));
     }
-
-    if let Some(position_event) = MessageOut::position_message(positions) {
-        server.broadcast_message(DefaultChannel::Unreliable, position_event.data);
+    if positions.len() > 0 {
+        if let Some(position_event) = MessageOut::position_message(positions) {
+            server.broadcast_message(DefaultChannel::Unreliable, position_event.data);
+        }
     }
 }
 

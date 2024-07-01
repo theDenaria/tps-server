@@ -63,7 +63,7 @@ fn start_server() -> Result<(), TransportError> {
         )
             .in_set(HandleGameEvents)
             .after(HandleServer),
-        (handle_air_movement, physics_step, update_physic_components)
+        (physics_step, handle_air_movement, update_physic_components)
             .chain()
             .in_set(Physics)
             .after(HandleGameEvents),
