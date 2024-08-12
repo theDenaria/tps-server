@@ -5,9 +5,16 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[profile.dev.package.bevy_rapier3d]
+opt-level = 3
+
+[profile.release]
+codegen-units = 1
+
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 bincode = "1.3"
 rand = "0.8"
 tracing = "0.1"
@@ -15,5 +22,7 @@ tracing-subscriber = {version = "0.3", features = ["env-filter"] }
 bytes = { version = "1", features = ["serde"] }
 octets = "0.3.0"
 byteorder = "1.5.0"
-bevy_ecs = "0.13.2"
-rapier3d = { version = "0.19.0", features = [ "simd-stable", "serde-serialize" ] }
+reqwest = { version = "0.12", features = ["json", "blocking"] }
+bevy = {version = "0.14", features= ["bevy_dev_tools"]}
+bevy_rapier3d = { version = "0.27.0", default-features = false, features = [ "dim3", "simd-stable", "serde-serialize", "debug-render-3d" ] }
+iyes_perf_ui = "0.3"

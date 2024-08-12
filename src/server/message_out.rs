@@ -1,5 +1,5 @@
+use bevy::math::{Quat, Vec3, Vec4};
 use bincode;
-use rapier3d::na::{UnitQuaternion, Vector3, Vector4};
 use serde::{Deserialize, Serialize};
 
 use crate::ecs::systems::setup::LevelObject;
@@ -21,7 +21,7 @@ impl MessageOut {
         with_header
     }
 
-    pub fn position_message(positions: Vec<(Vector3<f32>, String)>) -> Option<MessageOut> {
+    pub fn position_message(positions: Vec<(Vec3, String)>) -> Option<MessageOut> {
         let position_details: Vec<PositionDetails> = positions
             .iter()
             .map(|(position, player_id)| {
@@ -48,14 +48,14 @@ impl MessageOut {
         None
     }
 
-    pub fn rotation_message(rotations: Vec<(UnitQuaternion<f32>, String)>) -> Option<MessageOut> {
+    pub fn rotation_message(rotations: Vec<(Quat, String)>) -> Option<MessageOut> {
         let rotations: Vec<RotationDetails> = rotations
             .iter()
             .map(|(rotation, player_id)| {
                 let player_id_bytes = normalize_player_id(player_id.as_str());
                 RotationDetails {
                     player_id: player_id_bytes,
-                    rotation: Vector4::new(rotation.i, rotation.j, rotation.k, rotation.w),
+                    rotation: Vec4::new(rotation.x, rotation.y, rotation.z, rotation.w),
                 }
             })
             .collect();
@@ -112,11 +112,7 @@ impl MessageOut {
         None
     }
 
-    pub fn fire_message(
-        player_id: String,
-        origin: Vector3<f32>,
-        direction: Vector3<f32>,
-    ) -> MessageOut {
+    pub fn fire_message(player_id: String, origin: Vec3, direction: Vec3) -> MessageOut {
         let fire_details: FireDetails = FireDetails {
             player_id: normalize_player_id(player_id.as_str()),
             origin,
@@ -133,7 +129,7 @@ impl MessageOut {
         }
     }
 
-    pub fn hit_message(player_id: String, target_id: String, point: Vector3<f32>) -> MessageOut {
+    pub fn hit_message(player_id: String, target_id: String, point: Vec3) -> MessageOut {
         let hit_details: HitDetails = HitDetails {
             player_id: normalize_player_id(player_id.as_str()),
             target_id: normalize_player_id(target_id.as_str()),
@@ -198,7 +194,7 @@ struct PositionMessageOut {
 #[derive(Serialize, Deserialize, Debug)]
 struct PositionDetails {
     player_id: [u8; 16],
-    position: Vector3<f32>,
+    position: Vec3,
 }
 #[derive(Serialize, Deserialize, Debug)]
 struct RotationMessageOut {
@@ -208,21 +204,21 @@ struct RotationMessageOut {
 #[derive(Serialize, Deserialize, Debug)]
 struct RotationDetails {
     player_id: [u8; 16],
-    rotation: Vector4<f32>,
+    rotation: Vec4,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 struct FireDetails {
     player_id: [u8; 16],
-    origin: Vector3<f32>,
-    direction: Vector3<f32>,
+    origin: Vec3,
+    direction: Vec3,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 struct HitDetails {
     player_id: [u8; 16],
     target_id: [u8; 16],
-    point: Vector3<f32>,
+    point: Vec3,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

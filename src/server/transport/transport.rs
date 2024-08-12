@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use bevy_ecs::system::Resource;
+use bevy::prelude::Resource;
 
 use crate::{
     constants::TRANSPORT_MAX_PACKET_BYTES,
