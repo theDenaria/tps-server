@@ -1,19 +1,11 @@
-use std::time::Instant;
-
-use bevy_ecs::{
-    event::EventWriter,
-    schedule::SystemSet,
-    system::{Res, ResMut},
-};
+use bevy::prelude::{EventWriter, Query, Res, ResMut};
 
 use crate::{
     constants::TICK_DELTA,
     ecs::{
-        components::PlayerLookup,
-        events::{ConnectEvent, DisconnectEvent, FireEvent, JumpEvent, LookEvent, MoveEvent},
-        systems::send_events::{
-            send_disconnect_event, send_fire_event, send_look_event, send_move_event,
-        },
+        components::{MoveInput, PlayerLookup},
+        events::{ConnectEvent, DisconnectEvent, FireEvent, LookEvent},
+        systems::send_events::{send_disconnect_event, send_fire_event, send_look_event},
     },
     server::{
         channel::DefaultChannel,
@@ -26,13 +18,7 @@ use crate::{
     },
 };
 
-use super::{
-    send_events::{send_connect_event, send_jump_event},
-    setup::InstantResource,
-};
-
-#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
-pub struct HandleServer;
+use super::send_events::send_connect_event;
 
 pub fn handle_server_events(
     mut server: ResMut<MattaServer>,
@@ -64,9 +50,8 @@ pub fn handle_server_messages(
     mut server: ResMut<MattaServer>,
     player_lookup: Res<PlayerLookup>,
     mut connect_event: EventWriter<ConnectEvent>,
-    mut move_event: EventWriter<MoveEvent>,
+    mut move_query: Query<&mut MoveInput>,
     mut look_event: EventWriter<LookEvent>,
-    mut jump_event: EventWriter<JumpEvent>,
     mut fire_event: EventWriter<FireEvent>,
 ) {
     // Receive message from channel
@@ -92,13 +77,14 @@ pub fn handle_server_messages(
                 }
                 MessageInType::Move => {
                     let move_event_in = digest_move_message(event_in.data).unwrap();
-                    send_move_event(
-                        player_id,
-                        move_event_in.x,
-                        move_event_in.y,
-                        &player_lookup,
-                        &mut move_event,
-                    );
+                    if let Some(&player_entity) = player_lookup.map.get(player_id) {
+                        if let Ok(mut move_input) = move_query.get_mut(player_entity) {
+                            move_input.x = move_event_in.x;
+                            move_input.z = move_event_in.y;
+                        }
+                    } else {
+                        tracing::warn!("Player ID not found: {}", player_id);
+                    }
                 }
                 MessageInType::Fire => {
                     let fire_event_in = digest_fire_message(event_in.data).unwrap();
@@ -113,7 +99,13 @@ pub fn handle_server_messages(
                 }
 
                 MessageInType::Jump => {
-                    send_jump_event(player_id, &player_lookup, &mut jump_event);
+                    if let Some(&player_entity) = player_lookup.map.get(player_id) {
+                        if let Ok(mut move_input) = move_query.get_mut(player_entity) {
+                            move_input.y = 1.0;
+                        }
+                    } else {
+                        tracing::warn!("Player ID not found: {}", player_id);
+                    }
                 }
 
                 MessageInType::Connect => {
@@ -127,26 +119,9 @@ pub fn handle_server_messages(
     });
 }
 
-#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
-pub struct SendPackets;
-
 pub fn transport_send_packets(
     mut server: ResMut<MattaServer>,
     mut transport: ResMut<ServerTransport>,
-    mut timestamp: ResMut<InstantResource>,
 ) {
-    let elapsed_time = timestamp.0.elapsed();
-    if elapsed_time < TICK_DELTA {
-        let sleep_duration = TICK_DELTA - elapsed_time;
-        std::thread::sleep(sleep_duration);
-        timestamp.0 = Instant::now();
-    } else {
-        timestamp.0 = Instant::now();
-        tracing::warn!(
-            "Warning: Tick duration exceeded target! Elapsed: {:?}",
-            elapsed_time
-        );
-    }
-
     transport.send_packets(&mut server);
 }

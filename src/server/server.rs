@@ -1,7 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
 
-use bevy_ecs::system::Resource;
+use bevy::prelude::Resource;
 use bytes::Bytes;
 
 use super::connection::{ConnectionConfig, NetworkInfo, UnityClient};

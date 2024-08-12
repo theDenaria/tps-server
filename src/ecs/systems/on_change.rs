@@ -1,46 +1,32 @@
-use bevy_ecs::{
-    query::Changed,
-    schedule::SystemSet,
-    system::{Query, ResMut},
+use bevy::{
+    math::{Quat, Vec3},
+    prelude::{Changed, Query, ResMut, Transform},
 };
-use rapier3d::na::{UnitQuaternion, Vector3};
 
 use crate::{
-    ecs::components::{Health, IsGrounded, Player, Position, Rotation, VerticalVelocity},
+    ecs::components::{Health, Player},
     server::{channel::DefaultChannel, message_out::MessageOut, server::MattaServer},
 };
 
-#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
-pub struct HandleGameStateChanges;
-
 // Gets the Position component of all Entities whose Velocity has changed since the last run of the System
-pub fn on_position_change(
-    query: Query<(&Player, &Position), Changed<Position>>,
+pub fn on_transform_change(
+    query: Query<(&Player, &Transform), Changed<Transform>>,
     mut server: ResMut<MattaServer>,
 ) {
-    let mut positions: Vec<(Vector3<f32>, String)> = vec![];
+    let mut positions: Vec<(Vec3, String)> = vec![];
+    let mut rotations: Vec<(Quat, String)> = vec![];
 
-    for (player, position) in &query {
-        positions.push((position.0, player.id.clone()));
+    for (player, transform) in &query {
+        positions.push((transform.translation, player.id.clone()));
+        rotations.push((transform.rotation, player.id.clone()));
     }
     if positions.len() > 0 {
         if let Some(position_event) = MessageOut::position_message(positions) {
             server.broadcast_message(DefaultChannel::Unreliable, position_event.data);
         }
-    }
-}
-
-pub fn on_rotation_change(
-    query: Query<(&Player, &Rotation), Changed<Rotation>>,
-    mut server: ResMut<MattaServer>,
-) {
-    let mut rotations: Vec<(UnitQuaternion<f32>, String)> = vec![];
-    for (player, rotation) in &query {
-        rotations.push((rotation.0, player.id.clone()));
-    }
-
-    if let Some(rotation_message) = MessageOut::rotation_message(rotations) {
-        server.broadcast_message(DefaultChannel::Unreliable, rotation_message.data);
+        if let Some(rotation_message) = MessageOut::rotation_message(rotations) {
+            server.broadcast_message(DefaultChannel::Unreliable, rotation_message.data);
+        }
     }
 }
 
@@ -56,15 +42,5 @@ pub fn on_health_change(
         tracing::info!("Sending health messages: {:?}", healths);
         let health_message = MessageOut::health_message(healths);
         server.broadcast_message(DefaultChannel::ReliableOrdered, health_message.data);
-    }
-}
-
-pub fn on_grounded_change(
-    mut query: Query<(&mut VerticalVelocity, &IsGrounded), Changed<IsGrounded>>,
-) {
-    for (mut v_velocity, is_grounded) in &mut query {
-        if is_grounded.0 {
-            v_velocity.0 = 0.0;
-        }
     }
 }

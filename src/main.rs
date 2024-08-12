@@ -1,81 +1,103 @@
 #![allow(dead_code)]
-use std::io;
+use std::{env, io, time::Duration};
 mod constants;
 mod ecs;
-mod game_state;
 mod server;
 
+use bevy_rapier3d::{
+    plugin::{NoUserData, RapierPhysicsPlugin},
+    render::RapierDebugRenderPlugin,
+};
 use ecs::systems::{
+    debug::{
+        look_debug_camera, move_debug_camera, set_debug_3d_render_camera, set_debug_metrics,
+        set_debug_metrics_cam,
+    },
     handle_events::{
-        handle_connect_events, handle_disconnect_events, handle_fire_events, handle_hit_events,
-        handle_jump_events, handle_look_events, handle_move_events, HandleGameEvents,
+        handle_character_movement, handle_connect_events, handle_disconnect_events,
+        handle_fire_events, handle_hit_events, handle_look_events,
     },
-    handle_server::{
-        handle_server_events, handle_server_messages, transport_send_packets, HandleServer,
-    },
-    on_change::{on_health_change, on_position_change, on_rotation_change, HandleGameStateChanges},
-    physics::{handle_air_movement, physics_step, update_physic_components, Physics},
+    handle_server::{handle_server_events, handle_server_messages, transport_send_packets},
+    on_change::{on_health_change, on_transform_change},
     setup::{setup, setup_level},
 };
-use server::transport::error::TransportError;
-use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
-use bevy_ecs::prelude::*;
+use bevy::{
+    app::ScheduleRunnerPlugin,
+    diagnostic::{
+        EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin,
+        SystemInformationDiagnosticsPlugin,
+    },
+    prelude::*,
+};
 
-#[tokio::main]
-async fn main() -> io::Result<()> {
-    let subscriber = FmtSubscriber::builder()
-        .with_env_filter(EnvFilter::from_default_env())
-        .finish();
+use iyes_perf_ui::prelude::*;
 
-    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
-
-    // Now the tracing macros can be used throughout your application
-    tracing::info!("This will dynamically update on the terminal");
-
-    let _ = start_server();
-
+// #[tokio::main]
+fn main() -> io::Result<()> {
+    start_server();
     Ok(())
 }
 
-fn start_server() -> Result<(), TransportError> {
-    let mut world = World::default();
+#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
+enum MySet {
+    HandleServer,
+    HandleGameEvents,
+    Physics,
+    HandleGameStateChanges,
+}
 
-    let mut setup_schedule = Schedule::default();
+fn start_server() {
+    let enable_debug_metrics = env::var("DEBUG_METRICS").is_ok();
+    let enable_debug_cam = env::var("DEBUG_CAM").is_ok();
+    let mut app = App::new();
 
-    setup_schedule.add_systems((setup, setup_level).chain());
-    setup_schedule.run(&mut world);
+    if !enable_debug_metrics && !enable_debug_cam {
+        app.add_plugins(MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(
+            Duration::from_secs_f64(1.0 / 120.0),
+        )));
+    } else {
+        app.add_plugins(DefaultPlugins)
+            // .add_plugins(LogDiagnosticsPlugin::default())
+            .add_plugins(FrameTimeDiagnosticsPlugin)
+            .add_plugins(EntityCountDiagnosticsPlugin)
+            .add_plugins(SystemInformationDiagnosticsPlugin)
+            .add_plugins(PerfUiPlugin)
+            .add_systems(PostStartup, set_debug_metrics);
 
-    let mut schedule = Schedule::default();
-
-    schedule.add_systems((
-        (handle_server_messages, handle_server_events)
-            .chain()
-            .in_set(HandleServer),
-        (
-            handle_move_events,
-            handle_look_events,
-            handle_fire_events,
-            handle_hit_events,
-            handle_jump_events,
-            handle_connect_events,
-            handle_disconnect_events,
-        )
-            .in_set(HandleGameEvents)
-            .after(HandleServer),
-        (physics_step, handle_air_movement, update_physic_components)
-            .chain()
-            .in_set(Physics)
-            .after(HandleGameEvents),
-        (on_position_change, on_rotation_change, on_health_change)
-            .in_set(HandleGameStateChanges)
-            .after(Physics),
-        transport_send_packets.after(HandleGameStateChanges),
-    ));
-
-    // Your gameplay loop
-    loop {
-        // Receive new messages and update clients
-        schedule.run(&mut world);
+        if enable_debug_cam {
+            app.add_plugins(RapierDebugRenderPlugin::default())
+                .add_systems(PostStartup, set_debug_3d_render_camera)
+                .add_systems(Update, (move_debug_camera, look_debug_camera));
+        } else {
+            app.add_systems(PostStartup, set_debug_metrics_cam);
+        }
     }
+
+    app.add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
+        .add_systems(Startup, (setup, setup_level).chain())
+        .add_systems(
+            PreUpdate,
+            (handle_server_messages, handle_server_events).chain(),
+        )
+        .add_systems(
+            Update,
+            (
+                (
+                    handle_character_movement,
+                    handle_look_events,
+                    handle_fire_events,
+                    handle_hit_events,
+                    handle_connect_events,
+                    handle_disconnect_events,
+                )
+                    .in_set(MySet::HandleGameEvents)
+                    .after(MySet::HandleServer),
+                (on_transform_change, on_health_change)
+                    .in_set(MySet::HandleGameStateChanges)
+                    .after(MySet::HandleGameEvents),
+                transport_send_packets.after(MySet::HandleGameStateChanges),
+            ),
+        );
+    app.run();
 }

@@ -1,27 +1,20 @@
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket},
-    time::{Instant, SystemTime},
+    time::SystemTime,
     vec,
 };
 
-use bevy_ecs::{
-    event::Events,
-    system::{Commands, ResMut, Resource},
-};
-use rapier3d::{
-    control::{CharacterAutostep, CharacterLength, KinematicCharacterController},
-    na::Vector3,
-    prelude::*,
-};
-use serde::Serialize;
+use bevy::prelude::*;
+use bevy_rapier3d::prelude::*;
+
+use reqwest::Client;
+use serde::{Deserialize, Serialize};
+use tokio::runtime::Runtime;
 
 use crate::{
     ecs::{
-        components::{ColliderHandleLookup, PlayerLookup},
-        events::{
-            ConnectEvent, DisconnectEvent, FireEvent, HitEvent, JumpEvent, LookEvent, MoveEvent,
-        },
-        systems::physics::PhysicsResources,
+        components::PlayerLookup,
+        events::{ConnectEvent, DisconnectEvent, FireEvent, HitEvent, LookEvent},
     },
     server::{
         channel::DefaultChannel,
@@ -45,32 +38,6 @@ pub fn setup(mut commands: Commands) {
         public_addresses: vec![SERVER_ADDR],
     };
     let transport = ServerTransport::new(server_config, socket).unwrap();
-    let instant = InstantResource::default();
-
-    let mut character_controller = KinematicCharacterController::default();
-    character_controller.offset = CharacterLength::Absolute(0.01);
-    character_controller.snap_to_ground = Some(CharacterLength::Absolute(0.05));
-    character_controller.autostep = Some(CharacterAutostep {
-        max_height: CharacterLength::Absolute(0.05),
-        min_width: CharacterLength::Absolute(0.2),
-        include_dynamic_bodies: false,
-    });
-
-    let physics_res = PhysicsResources {
-        gravity: vector![0.0, -9.81, 0.0],
-        integration_parameters: IntegrationParameters::default(),
-        physics_pipeline: PhysicsPipeline::new(),
-        island_manager: IslandManager::new(),
-        broad_phase: BroadPhaseMultiSap::new(),
-        narrow_phase: NarrowPhase::new(),
-        rigid_body_set: RigidBodySet::new(),
-        collider_set: ColliderSet::new(),
-        impulse_joint_set: ImpulseJointSet::new(),
-        multibody_joint_set: MultibodyJointSet::new(),
-        ccd_solver: CCDSolver::new(),
-        query_pipeline: QueryPipeline::new(),
-        character_controller,
-    };
 
     let objects: Vec<LevelObject> = vec![];
 
@@ -79,82 +46,82 @@ pub fn setup(mut commands: Commands) {
     commands.insert_resource(server);
     commands.insert_resource(transport);
     commands.insert_resource(PlayerLookup::new());
-    commands.insert_resource(ColliderHandleLookup::new());
-    commands.insert_resource(instant);
-    commands.insert_resource(physics_res);
     commands.insert_resource(level_objects);
 
     commands.insert_resource(Events::<ConnectEvent>::default());
     commands.insert_resource(Events::<DisconnectEvent>::default());
-    commands.insert_resource(Events::<MoveEvent>::default());
     commands.insert_resource(Events::<LookEvent>::default());
-    commands.insert_resource(Events::<JumpEvent>::default());
     commands.insert_resource(Events::<FireEvent>::default());
     commands.insert_resource(Events::<HitEvent>::default());
 }
 
-pub fn setup_level(
-    mut physics_res: ResMut<PhysicsResources>,
-    mut level_objects: ResMut<LevelObjects>,
-) {
-    let PhysicsResources {
-        rigid_body_set,
-        collider_set,
-        ..
-    } = &mut *physics_res;
+pub fn setup_level(mut commands: Commands, mut level_objects: ResMut<LevelObjects>) {
+    let runtime = Runtime::new().unwrap();
+    runtime.block_on(async {
+        let level_objects_vec = get_level_objects().await;
+        level_objects.objects = level_objects_vec;
+    });
+    trace!("Before");
+    for object in level_objects.objects.iter() {
+        match object.object_type.as_str() {
+            "MeshCollider" => object.new_mesh(&mut commands),
+            "CapsuleCollider" => object.new_capsule(&mut commands),
+            "SphereCollider" => object.new_sphere(&mut commands),
+            "BoxCollider" => object.new_cuboid(&mut commands),
+            _ => {}
+        }
+    }
+}
 
-    let terrain_object = LevelObject::new_cuboid(
-        rigid_body_set,
-        collider_set,
-        vector![500.0, 0.1, 500.0],
-        vector![500.0, 0.0, 500.0],
-        LevelObjectColor::Gray,
-    );
+pub async fn get_level_objects() -> Vec<LevelObject> {
+    let mut i = 2667;
+    let client = Client::new();
 
-    let cube_object = LevelObject::new_cuboid(
-        rigid_body_set,
-        collider_set,
-        vector![100.0, 0.5, 100.0],
-        vector![100.0, 0.5, 100.0],
-        LevelObjectColor::Green,
-    );
+    let mut level_objects: Vec<LevelObject> = vec![];
 
-    let cube2_object = LevelObject::new_cuboid(
-        rigid_body_set,
-        collider_set,
-        vector![10.0, 5.0, 3.0],
-        vector![10.0, 5.0, 30.0],
-        LevelObjectColor::Red,
-    );
+    loop {
+        // if i > 2143 {
+        //     break;
+        // }
+        let url = format!("http://localhost:3000/get-object?id={}", i);
 
-    let player_object = LevelObject::new_capsule(
-        rigid_body_set,
-        collider_set,
-        vector![1.0, 1.0, 1.0],
-        vector![5.0, 3.0, 25.0],
-        LevelObjectColor::Blue,
-    );
+        // Use the blocking client to make a synchronous request
+        let res = client.get(&url).send().await.unwrap();
 
-    level_objects.objects.push(terrain_object);
-    level_objects.objects.push(cube_object);
-    level_objects.objects.push(cube2_object);
-    level_objects.objects.push(player_object);
+        if res.status().is_success() {
+        } else {
+            println!("Failed to fetch object {}", i);
+            break;
+        }
 
-    let map_width = 200.0;
-    let map_height = 200.0;
-    let wall_height = 50.0;
-    let wall_thickness = 1.0;
+        let object_db: LevelObjectSchema = res.json().await.unwrap();
 
-    let edge_objects = LevelObject::new_edges(
-        rigid_body_set,
-        collider_set,
-        map_width,
-        map_height,
-        wall_height,
-        wall_thickness,
-    );
+        let position: Vector3Deserialized =
+            serde_json::from_str(object_db.position.as_str()).unwrap();
+        let rotation: Vector4Deserialized =
+            serde_json::from_str(object_db.rotation.as_str()).unwrap();
+        let scale: Vector3Deserialized = serde_json::from_str(object_db.scale.as_str()).unwrap();
 
-    level_objects.objects.extend(edge_objects);
+        let object_type = object_db.object_type;
+
+        let translation = Vec3::new(position.x, position.y, position.z);
+        let rotation = Quat::from_xyzw(rotation.x, rotation.y, rotation.z, rotation.w);
+
+        let scale = Vec3::new(scale.x, scale.y, scale.z);
+
+        let level_object = LevelObject {
+            object_type,
+            translation,
+            rotation,
+            scale,
+            collider: object_db.collider,
+        };
+
+        level_objects.push(level_object);
+
+        i += 1;
+    }
+    level_objects
 }
 
 pub fn send_level_objects(
@@ -180,164 +147,199 @@ pub struct LevelObjects {
 }
 
 // Level Object size format uses the convention of Unity3D Game Engine's scale
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LevelObject {
     // Ball: 0, Cube: 1, Capsule: 2
-    object_type: u8,
-    color: u8,
-    translation: Vector3<f32>,
-    size: Vector3<f32>,
+    //id: i32,
+    object_type: String,
+    translation: Vec3,
+    rotation: Quat,
+    scale: Vec3,
+    collider: String,
+}
+
+#[derive(Deserialize)]
+struct Vector3Deserialized {
+    x: f32,
+    y: f32,
+    z: f32,
+}
+
+#[derive(Deserialize)]
+struct Vector4Deserialized {
+    x: f32,
+    y: f32,
+    z: f32,
+    w: f32,
+}
+
+// Level Object size format uses the convention of Unity3D Game Engine's scale
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct LevelObjectSchema {
+    object_type: String,
+    position: String,
+    rotation: String,
+    scale: String,
+    collider: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct MeshData {
+    vertices: Vec<Vec3>,
+    triangles: Vec<i32>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct CuboidData {
+    x: f32,
+    y: f32,
+    z: f32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct BallData {
+    radius: f32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct CapsuleData {
+    radius: f32,
+    height: f32,
+    direction: i32,
+}
+
+#[derive(Deserialize)]
+struct VerticeDeserialized {
+    x: f32,
+    y: f32,
+    z: f32,
+}
+
+#[derive(Deserialize)]
+struct MeshDataDeserialized {
+    vertices: Vec<VerticeDeserialized>,
+    triangles: Vec<i32>,
+}
+
+impl MeshDataDeserialized {
+    fn to_mesh_data(&self) -> MeshData {
+        MeshData {
+            vertices: self
+                .vertices
+                .iter()
+                .map(|ver| Vec3::new(ver.x, ver.y, ver.z))
+                .collect(),
+            triangles: self.triangles.clone(),
+        }
+    }
 }
 
 impl LevelObject {
-    fn new_cuboid(
-        rigid_body_set: &mut RigidBodySet,
-        collider_set: &mut ColliderSet,
-        size: Vector3<f32>,
-        translation: Vector3<f32>,
-        color: LevelObjectColor,
-    ) -> LevelObject {
-        let rigid_body = RigidBodyBuilder::new(RigidBodyType::Fixed)
-            .translation(translation)
-            .build();
-        let rigid_body_handle = rigid_body_set.insert(rigid_body);
-
-        let collider = ColliderBuilder::cuboid(size.x / 2.0, size.y / 2.0, size.z / 2.0).build();
-
-        let _collider_handle =
-            collider_set.insert_with_parent(collider, rigid_body_handle, rigid_body_set);
-
-        LevelObject {
-            object_type: 1,
-            color: color as u8,
-            translation,
-            size,
-        }
+    fn new_cuboid(&self, commands: &mut Commands) {
+        let coboid_data: CuboidData = serde_json::from_str(self.collider.as_str()).unwrap();
+        commands
+            .spawn(RigidBody::Fixed)
+            .insert(Collider::cuboid(
+                coboid_data.x / 2.0,
+                coboid_data.y / 2.0,
+                coboid_data.z / 2.0,
+            ))
+            .insert(TransformBundle::from(
+                Transform::from_translation(self.translation)
+                    .with_rotation(self.rotation)
+                    .with_scale(self.scale),
+            ));
     }
 
-    fn new_capsule(
-        rigid_body_set: &mut RigidBodySet,
-        collider_set: &mut ColliderSet,
-        size: Vector3<f32>,
-        translation: Vector3<f32>,
-        color: LevelObjectColor,
-    ) -> LevelObject {
-        let rigid_body = RigidBodyBuilder::new(RigidBodyType::Fixed)
-            .translation(translation)
-            .build();
-        let rigid_body_handle = rigid_body_set.insert(rigid_body);
+    fn new_capsule(&self, commands: &mut Commands) {
+        let capsule_data: CapsuleData = serde_json::from_str(self.collider.as_str()).unwrap();
+        match capsule_data.direction {
+            0 => {
+                commands
+                    .spawn(RigidBody::Fixed)
+                    .insert(Collider::capsule_x(
+                        capsule_data.height / 2.0,
+                        capsule_data.radius,
+                    ))
+                    .insert(TransformBundle::from(
+                        Transform::from_translation(self.translation)
+                            .with_rotation(self.rotation)
+                            .with_scale(self.scale),
+                    ));
+            }
 
-        let collider = ColliderBuilder::capsule_y(size.y / 2.0, size.x / 2.0).build();
+            1 => {
+                commands
+                    .spawn(RigidBody::Fixed)
+                    .insert(Collider::capsule_y(
+                        capsule_data.height / 2.0,
+                        capsule_data.radius,
+                    ))
+                    .insert(TransformBundle::from(
+                        Transform::from_translation(self.translation)
+                            .with_rotation(self.rotation)
+                            .with_scale(self.scale),
+                    ));
+            }
 
-        let _collider_handle =
-            collider_set.insert_with_parent(collider, rigid_body_handle, rigid_body_set);
-
-        LevelObject {
-            object_type: 2,
-            color: color as u8,
-            translation,
-            size,
-        }
+            2 => {
+                commands
+                    .spawn(RigidBody::Fixed)
+                    .insert(Collider::capsule_z(
+                        capsule_data.height / 2.0,
+                        capsule_data.radius,
+                    ))
+                    .insert(TransformBundle::from(
+                        Transform::from_translation(self.translation)
+                            .with_rotation(self.rotation)
+                            .with_scale(self.scale),
+                    ));
+            }
+            _ => {
+                tracing::error!("Invalid Capsule collider direction");
+                return;
+            }
+        };
     }
 
-    fn new_edges(
-        rigid_body_set: &mut RigidBodySet,
-        collider_set: &mut ColliderSet,
-        map_width: f32,
-        map_height: f32,
-        wall_height: f32,
-        wall_thickness: f32,
-    ) -> Vec<LevelObject> {
-        let front_object = LevelObject::new_cuboid(
-            rigid_body_set,
-            collider_set,
-            vector![map_width, wall_height, wall_thickness],
-            vector![map_width / 2.0, wall_height / 2.0, 0.0],
-            LevelObjectColor::None,
-        );
-
-        let left_object = LevelObject::new_cuboid(
-            rigid_body_set,
-            collider_set,
-            vector![wall_thickness, wall_height, map_height],
-            vector![0.0, wall_height / 2.0, map_height / 2.0],
-            LevelObjectColor::None,
-        );
-
-        let back_object = LevelObject::new_cuboid(
-            rigid_body_set,
-            collider_set,
-            vector![map_width, wall_height, wall_thickness],
-            vector![map_width / 2.0, wall_height / 2.0, map_height],
-            LevelObjectColor::White,
-        );
-
-        let rigth_object = LevelObject::new_cuboid(
-            rigid_body_set,
-            collider_set,
-            vector![wall_thickness, wall_height, map_height],
-            vector![map_width, wall_height / 2.0, map_height / 2.0],
-            LevelObjectColor::White,
-        );
-
-        let ceiling_object = LevelObject::new_cuboid(
-            rigid_body_set,
-            collider_set,
-            vector![map_width, wall_thickness, map_height],
-            vector![map_width / 2.0, wall_height, map_height / 2.0],
-            LevelObjectColor::None,
-        );
-
-        let ground_object = LevelObject::new_cuboid(
-            rigid_body_set,
-            collider_set,
-            vector![map_width, wall_thickness, map_height],
-            vector![map_width / 2.0, 0.0, map_height / 2.0],
-            LevelObjectColor::White,
-        );
-
-        let edges = vec![
-            front_object,
-            left_object,
-            back_object,
-            rigth_object,
-            ceiling_object,
-            ground_object,
-        ];
-        edges
+    fn new_sphere(&self, commands: &mut Commands) {
+        let ball_data: BallData = serde_json::from_str(self.collider.as_str()).unwrap();
+        commands
+            .spawn(RigidBody::Fixed)
+            .insert(Collider::ball(ball_data.radius))
+            .insert(TransformBundle::from(
+                Transform::from_translation(self.translation)
+                    .with_rotation(self.rotation)
+                    .with_scale(self.scale),
+            ));
     }
-}
 
-#[repr(u8)]
-enum LevelObjectColor {
-    None = 0,  // 0
-    Red = 1,   // 1
-    Green = 2, // 2
-    Blue = 3,  // 3
-    White = 4, // 4
-    Black = 5, // 5
-    Gray = 6,  // 6
-}
+    fn new_mesh(&self, commands: &mut Commands) {
+        let data: MeshDataDeserialized = serde_json::from_str(self.collider.as_str()).unwrap();
+        let mesh_data = data.to_mesh_data();
 
-#[derive(Resource)]
-pub struct InstantResource(pub Instant);
+        let vertices = mesh_data
+            .vertices
+            .iter()
+            .map(|vertice| Vec3::new(vertice.x, vertice.y, vertice.z))
+            .collect();
 
-impl Default for InstantResource {
-    fn default() -> Self {
-        InstantResource(Instant::now())
+        let indices: Vec<[u32; 3]> = mesh_data
+            .triangles
+            .chunks(3)
+            .map(|chunk| [chunk[0] as u32, chunk[1] as u32, chunk[2] as u32])
+            .collect();
+
+        let id = commands
+            .spawn(RigidBody::Fixed)
+            .insert(Collider::trimesh(vertices, indices))
+            .insert(TransformBundle::from(
+                Transform::from_xyz(self.translation.x, self.translation.y, self.translation.z)
+                    .with_rotation(self.rotation)
+                    .with_scale(self.scale),
+            ))
+            .id();
+
+        trace!("Collider spawned by id : {:?}", id);
     }
-}
-
-struct MapEdgesPositions {
-    front: Vector3<f32>,
-    left: Vector3<f32>,
-    back: Vector3<f32>,
-    right: Vector3<f32>,
-    ceiling: Vector3<f32>,
-    ground: Vector3<f32>,
-}
-
-struct MapEdge {
-    position: Vector3<f32>,
-    scale: Vector3<f32>,
 }

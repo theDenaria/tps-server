@@ -1,4 +1,4 @@
-use rapier3d::na::{Point3, Vector3};
+use bevy::math::Vec3;
 
 #[derive(Debug)]
 pub struct MessageIn {
@@ -48,9 +48,9 @@ pub struct RotationMessageIn {
 
 #[derive(Debug)]
 pub struct FireMessageIn {
-    pub cam_origin: Point3<f32>,
-    pub direction: Vector3<f32>,
-    pub barrel_origin: Point3<f32>,
+    pub cam_origin: Vec3,
+    pub direction: Vec3,
+    pub barrel_origin: Vec3,
 }
 
 pub struct Jump {}
@@ -177,19 +177,19 @@ pub fn digest_fire_message(data: Vec<u8>) -> Result<FireMessageIn, &'static str>
         .try_into()
         .map_err(|_| "Failed to slice y bytes")?;
 
-    let cam_origin = Point3::new(
+    let cam_origin = Vec3::new(
         f32::from_ne_bytes(cam_origin_x_bytes),
         f32::from_ne_bytes(cam_origin_y_bytes),
         f32::from_ne_bytes(cam_origin_z_bytes),
     );
 
-    let direction = Vector3::new(
+    let direction = Vec3::new(
         f32::from_ne_bytes(direction_x_bytes),
         f32::from_ne_bytes(direction_y_bytes),
         f32::from_ne_bytes(direction_z_bytes),
     );
 
-    let barrel_origin = Point3::new(
+    let barrel_origin = Vec3::new(
         f32::from_ne_bytes(barrel_origin_x_bytes),
         f32::from_ne_bytes(barrel_origin_y_bytes),
         f32::from_ne_bytes(barrel_origin_z_bytes),
