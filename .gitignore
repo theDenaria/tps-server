@@ -14,8 +14,8 @@ Cargo.lock
 *.pdb
 
 ignore.txt
+
 .env
-
-level_object*
-
 .idea
+
+level_objects*
