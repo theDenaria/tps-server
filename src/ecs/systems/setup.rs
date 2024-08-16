@@ -1,10 +1,17 @@
 use std::{
+    io::{BufReader, BufWriter, Error},
     net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket},
+    path::Path,
     time::SystemTime,
     vec,
 };
 
-use bevy::prelude::*;
+use std::fs::File;
+
+use bevy::{
+    prelude::*,
+    tasks::{ComputeTaskPool, ParallelSlice},
+};
 use bevy_rapier3d::prelude::*;
 
 use reqwest::Client;
@@ -17,9 +24,7 @@ use crate::{
         events::{ConnectEvent, DisconnectEvent, FireEvent, HitEvent, LookEvent},
     },
     server::{
-        channel::DefaultChannel,
         connection::ConnectionConfig,
-        message_out::MessageOut,
         server::MattaServer,
         transport::{server::server::ServerConfig, transport::ServerTransport},
     },
@@ -55,90 +60,125 @@ pub fn setup(mut commands: Commands) {
     commands.insert_resource(Events::<HitEvent>::default());
 }
 
-pub fn setup_level(mut commands: Commands, mut level_objects: ResMut<LevelObjects>) {
+pub fn setup_level(par_commands: ParallelCommands, mut level_objects: ResMut<LevelObjects>) {
     let runtime = Runtime::new().unwrap();
     runtime.block_on(async {
         let level_objects_vec = get_level_objects().await;
         level_objects.objects = level_objects_vec;
     });
-    trace!("Before");
-    for object in level_objects.objects.iter() {
-        match object.object_type.as_str() {
-            "MeshCollider" => object.new_mesh(&mut commands),
-            "CapsuleCollider" => object.new_capsule(&mut commands),
-            "SphereCollider" => object.new_sphere(&mut commands),
-            "BoxCollider" => object.new_cuboid(&mut commands),
-            _ => {}
-        }
-    }
+    trace!(
+        "Spawning {:?} level object colliders",
+        level_objects.objects.len()
+    );
+    level_objects
+        .objects
+        .par_splat_map(ComputeTaskPool::get(), None, |_, data| {
+            for item in data.iter() {
+                par_commands.command_scope(|mut commands| match item.object_type.as_str() {
+                    "MeshCollider" => item.new_mesh(&mut commands),
+                    "CapsuleCollider" => item.new_capsule(&mut commands),
+                    "SphereCollider" => item.new_sphere(&mut commands),
+                    "BoxCollider" => item.new_cuboid(&mut commands),
+                    _ => {}
+                });
+            }
+        });
+    trace!("Level Objects spawning completed!");
 }
 
 pub async fn get_level_objects() -> Vec<LevelObject> {
-    let mut i = 2667;
-    let client = Client::new();
-
+    let client = Client::builder()
+        .danger_accept_invalid_certs(true) // Ignore SSL certificate validation
+        .build()
+        .expect("Failed to create client");
     let mut level_objects: Vec<LevelObject> = vec![];
 
-    loop {
-        // if i > 2143 {
-        //     break;
-        // }
-        let url = format!("http://localhost:3000/get-object?id={}", i);
+    dotenvy::dotenv().unwrap();
 
-        // Use the blocking client to make a synchronous request
-        let res = client.get(&url).send().await.unwrap();
+    let level_server_url = std::env::var("LEVEL_SERVER").unwrap();
+    let level_objects_version = std::env::var("LEVEL_OBJECTS_VERSION").unwrap();
 
-        if res.status().is_success() {
-        } else {
-            println!("Failed to fetch object {}", i);
-            break;
+    let get_first_id_url = format!(
+        "{}/get-first?version={}",
+        level_server_url.as_str(),
+        level_objects_version.as_str()
+    );
+
+    let first_id_res = client.get(&get_first_id_url).send().await.unwrap();
+    let first_id: LevelObjectFirstIdResponse = first_id_res.json().await.unwrap();
+
+    let mut i = first_id.id;
+
+    let level_cache_file_path = format!(
+        "level_objects_cache_v{}.json",
+        level_objects_version.as_str()
+    );
+
+    let cached_level_objects: Vec<LevelObject> = match read_from_file(&level_cache_file_path) {
+        Ok(o) => o,
+        Err(_) => Vec::new(),
+    };
+
+    let mut use_cache = false;
+
+    if cached_level_objects.len() > 0 {
+        if cached_level_objects[0].id == i {
+            use_cache = true;
+            level_objects = cached_level_objects;
+        }
+    }
+    if !use_cache {
+        trace!("Valid chace not found, getting level objects from level-server");
+        loop {
+            let url = format!("https://165.232.64.185/get-object?version=tps_0_1&id={}", i);
+
+            // Use the blocking client to make a synchronous request
+            let res = client.get(&url).send().await.unwrap();
+
+            if res.status().is_success() {
+            } else {
+                trace!("Failed to fetch object {}", i);
+                break;
+            }
+
+            let object_db: LevelObjectSchema = res.json().await.unwrap();
+
+            let position: Vector3Deserialized =
+                serde_json::from_str(object_db.position.as_str()).unwrap();
+            let rotation: Vector4Deserialized =
+                serde_json::from_str(object_db.rotation.as_str()).unwrap();
+            let scale: Vector3Deserialized =
+                serde_json::from_str(object_db.scale.as_str()).unwrap();
+
+            let object_type = object_db.object_type;
+
+            let translation = Vec3::new(position.x, position.y, position.z);
+            let rotation = Quat::from_xyzw(rotation.x, rotation.y, rotation.z, rotation.w);
+
+            let scale = Vec3::new(scale.x, scale.y, scale.z);
+
+            let level_object = LevelObject {
+                id: object_db.id,
+                object_type,
+                translation,
+                rotation,
+                scale,
+                collider: object_db.collider,
+            };
+
+            level_objects.push(level_object);
+
+            i += 1;
         }
 
-        let object_db: LevelObjectSchema = res.json().await.unwrap();
-
-        let position: Vector3Deserialized =
-            serde_json::from_str(object_db.position.as_str()).unwrap();
-        let rotation: Vector4Deserialized =
-            serde_json::from_str(object_db.rotation.as_str()).unwrap();
-        let scale: Vector3Deserialized = serde_json::from_str(object_db.scale.as_str()).unwrap();
-
-        let object_type = object_db.object_type;
-
-        let translation = Vec3::new(position.x, position.y, position.z);
-        let rotation = Quat::from_xyzw(rotation.x, rotation.y, rotation.z, rotation.w);
-
-        let scale = Vec3::new(scale.x, scale.y, scale.z);
-
-        let level_object = LevelObject {
-            object_type,
-            translation,
-            rotation,
-            scale,
-            collider: object_db.collider,
-        };
-
-        level_objects.push(level_object);
-
-        i += 1;
+        write_to_file(&level_cache_file_path, &level_objects).unwrap();
+        trace!(
+            "Latest level objects are cached to file: {}",
+            level_cache_file_path.as_str()
+        )
     }
+
     level_objects
-}
-
-pub fn send_level_objects(
-    server: &mut MattaServer,
-    level_objects: &LevelObjects,
-    player_id: String,
-) {
-    let level_objects_message =
-        MessageOut::level_objects_message(level_objects.objects.clone()).unwrap();
-
-    let client_id = server.client_id_by_player_id(player_id).unwrap();
-
-    server.send_message(
-        client_id,
-        DefaultChannel::ReliableOrdered,
-        level_objects_message.data,
-    )
 }
 
 #[derive(Debug, Resource, Serialize)]
@@ -150,7 +190,7 @@ pub struct LevelObjects {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LevelObject {
     // Ball: 0, Cube: 1, Capsule: 2
-    //id: i32,
+    id: i32,
     object_type: String,
     translation: Vec3,
     rotation: Quat,
@@ -175,7 +215,14 @@ struct Vector4Deserialized {
 
 // Level Object size format uses the convention of Unity3D Game Engine's scale
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct LevelObjectFirstIdResponse {
+    id: i32,
+}
+
+// Level Object size format uses the convention of Unity3D Game Engine's scale
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LevelObjectSchema {
+    id: i32,
     object_type: String,
     position: String,
     rotation: String,
@@ -330,16 +377,37 @@ impl LevelObject {
             .map(|chunk| [chunk[0] as u32, chunk[1] as u32, chunk[2] as u32])
             .collect();
 
-        let id = commands
+        commands
             .spawn(RigidBody::Fixed)
             .insert(Collider::trimesh(vertices, indices))
             .insert(TransformBundle::from(
                 Transform::from_xyz(self.translation.x, self.translation.y, self.translation.z)
                     .with_rotation(self.rotation)
                     .with_scale(self.scale),
-            ))
-            .id();
-
-        trace!("Collider spawned by id : {:?}", id);
+            ));
     }
+}
+
+// Function to read data from a file
+fn read_from_file(file_path: &str) -> Result<Vec<LevelObject>, Error> {
+    let path = Path::new(file_path);
+    if path.exists() {
+        let file = File::open(file_path)?;
+        let reader = BufReader::new(file);
+        let level_objects: Vec<LevelObject> = serde_json::from_reader(reader)?;
+        Ok(level_objects)
+    } else {
+        Ok(Vec::new())
+    }
+}
+
+// Function to write data to a file
+fn write_to_file(file_path: &str, data: &Vec<LevelObject>) -> Result<(), Error> {
+    // let json_data = serde_json::to_string_pretty(data)?;
+    // let mut file = File::create(file_path)?;
+    // file.write_all(json_data.as_bytes())?;
+    let file = File::create(file_path)?;
+    let writer = BufWriter::new(file);
+    serde_json::to_writer(writer, data)?;
+    Ok(())
 }
