@@ -48,6 +48,13 @@ enum MySet {
 }
 
 fn start_server() {
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::TRACE)
+        .init();
+
+    // Optionally log an informational message
+    info!("Starting server...");
+
     let enable_debug_metrics = env::var("DEBUG_METRICS").is_ok();
     let enable_debug_cam = env::var("DEBUG_CAM").is_ok();
     let mut app = App::new();

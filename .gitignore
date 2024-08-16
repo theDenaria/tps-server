@@ -15,5 +15,7 @@ Cargo.lock
 
 ignore.txt
 
-#RustRover generated files are in this folder.
+.env
 .idea
+
+level_objects*
