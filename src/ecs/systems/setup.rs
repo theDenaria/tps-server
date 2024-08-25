@@ -21,17 +21,19 @@ use tokio::runtime::Runtime;
 use crate::{
     ecs::{
         components::PlayerLookup,
-        events::{ConnectEvent, DisconnectEvent, FireEvent, HitEvent, LookEvent},
+        events::{
+            ConnectEvent, DisconnectEvent, FireEvent, HitEvent, JumpEvent, LookEvent, MoveEvent,
+        },
     },
     server::{
         connection::ConnectionConfig,
-        server::MattaServer,
+        server::DenariaServer,
         transport::{server::server::ServerConfig, transport::ServerTransport},
     },
 };
 
 pub fn setup(mut commands: Commands) {
-    let server = MattaServer::new(ConnectionConfig::default());
+    let server = DenariaServer::new(ConnectionConfig::default());
     // Setup transport layer
     const SERVER_ADDR: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 5000);
     let socket: UdpSocket = UdpSocket::bind(SERVER_ADDR).unwrap();
@@ -48,8 +50,6 @@ pub fn setup(mut commands: Commands) {
 
     let level_objects = LevelObjects { objects };
 
-    commands.insert_resource(server);
-    commands.insert_resource(transport);
     commands.insert_resource(PlayerLookup::new());
     commands.insert_resource(level_objects);
 
@@ -58,6 +58,8 @@ pub fn setup(mut commands: Commands) {
     commands.insert_resource(Events::<LookEvent>::default());
     commands.insert_resource(Events::<FireEvent>::default());
     commands.insert_resource(Events::<HitEvent>::default());
+    commands.insert_resource(Events::<MoveEvent>::default());
+    commands.insert_resource(Events::<JumpEvent>::default());
 }
 
 pub fn setup_level(par_commands: ParallelCommands, mut level_objects: ResMut<LevelObjects>) {

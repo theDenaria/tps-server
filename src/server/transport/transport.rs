@@ -8,7 +8,7 @@ use bevy::prelude::Resource;
 
 use crate::{
     constants::TRANSPORT_MAX_PACKET_BYTES,
-    server::server::{ClientId, MattaServer},
+    server::server::{ClientId, DenariaServer},
 };
 
 use super::{
@@ -57,7 +57,7 @@ impl ServerTransport {
 
     /// Disconnects all connected clients.
     /// This sends the disconnect packet instantly, use this when closing/exiting games,
-    pub fn disconnect_all(&mut self, server: &mut MattaServer) {
+    pub fn disconnect_all(&mut self, server: &mut DenariaServer) {
         for client_id in self.transport_server.clients_id() {
             let server_result = self.transport_server.disconnect(client_id);
             handle_server_result(server_result, &self.socket, server);
@@ -75,7 +75,7 @@ impl ServerTransport {
     pub fn update(
         &mut self,
         duration: Duration,
-        server: &mut MattaServer,
+        server: &mut DenariaServer,
     ) -> Result<(), TransportError> {
         self.transport_server.update(duration);
 
@@ -108,7 +108,7 @@ impl ServerTransport {
     }
 
     /// Send packets to connected clients.
-    pub fn send_packets(&mut self, server: &mut MattaServer) {
+    pub fn send_packets(&mut self, server: &mut DenariaServer) {
         'clients: for client_id in server.clients_id() {
             let packets = server.get_packets_to_send(client_id).unwrap();
             for packet in packets {
@@ -139,7 +139,7 @@ impl ServerTransport {
 fn handle_server_result(
     server_result: ServerResult,
     socket: &UdpSocket,
-    reliable_server: &mut MattaServer,
+    reliable_server: &mut DenariaServer,
 ) {
     let send_packet = |packet: &[u8], addr: SocketAddr| {
         if let Err(err) = socket.send_to(packet, addr) {

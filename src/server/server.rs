@@ -22,14 +22,14 @@ pub enum ServerEvent {
 }
 
 #[derive(Debug, Resource)]
-pub struct MattaServer {
+pub struct DenariaServer {
     connections: HashMap<ClientId, UnityClient>,
     player_connection_map: HashMap<String, ClientId>,
     connection_config: ConnectionConfig,
     events: VecDeque<ServerEvent>,
 }
 
-impl MattaServer {
+impl DenariaServer {
     pub fn new(connection_config: ConnectionConfig) -> Self {
         Self {
             connections: HashMap::new(),

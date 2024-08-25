@@ -1,110 +1,112 @@
 #![allow(dead_code)]
-use std::{env, io, time::Duration};
+use std::{
+    io,
+    net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket},
+    sync::{Arc, Mutex},
+    time::SystemTime,
+};
 mod constants;
 mod ecs;
 mod server;
+mod sessions;
 
-use bevy_rapier3d::{
-    plugin::{NoUserData, RapierPhysicsPlugin},
-    render::RapierDebugRenderPlugin,
-};
-use ecs::systems::{
-    debug::{
-        look_debug_camera, move_debug_camera, set_debug_3d_render_camera, set_debug_metrics,
-        set_debug_metrics_cam,
-    },
-    handle_events::{
-        handle_character_movement, handle_connect_events, handle_disconnect_events,
-        handle_fire_events, handle_hit_events, handle_look_events,
-    },
-    handle_server::{handle_server_events, handle_server_messages, transport_send_packets},
-    on_change::{on_health_change, on_transform_change},
-    setup::{setup, setup_level},
-};
+use bevy::prelude::*;
 
-use bevy::{
-    app::ScheduleRunnerPlugin,
-    diagnostic::{
-        EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin,
-        SystemInformationDiagnosticsPlugin,
-    },
-    prelude::*,
+use server::{
+    channel::DefaultChannel,
+    connection::ConnectionConfig,
+    message_in::{MessageIn, MessageInType},
+    server::DenariaServer,
+    transport::{server::server::ServerConfig, transport::ServerTransport},
 };
-
-use iyes_perf_ui::prelude::*;
+use sessions::{NetworkResource, SessionHandler};
 
 // #[tokio::main]
 fn main() -> io::Result<()> {
-    start_server();
-    Ok(())
-}
+    let mut server = Arc::new(Mutex::new(DenariaServer::new(ConnectionConfig::default())));
+    // Setup transport layer
+    const SERVER_ADDR: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 5000);
+    let socket: UdpSocket = UdpSocket::bind(SERVER_ADDR)?;
+    let server_config = ServerConfig {
+        current_time: SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap(),
+        max_clients: 64,
+        public_addresses: vec![SERVER_ADDR],
+    };
+    let transport = Arc::new(Mutex::new(ServerTransport::new(server_config, socket)?));
 
-#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
-enum MySet {
-    HandleServer,
-    HandleGameEvents,
-    Physics,
-    HandleGameStateChanges,
-}
+    let mut session_handler = Arc::new(Mutex::new(SessionHandler::new()));
+    let mut session_handler_lock = session_handler.lock().unwrap();
+    loop {
+        server
+            .lock()
+            .unwrap()
+            .clients_id()
+            .iter()
+            .for_each(|client_id| {
+                while let Some((message, player_id)) = server
+                    .lock()
+                    .unwrap()
+                    .receive_message(*client_id, DefaultChannel::Unreliable)
+                {
+                    let event_in = MessageIn::new(player_id.clone(), message.to_vec()).unwrap();
 
-fn start_server() {
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::TRACE)
-        .init();
+                    match event_in.event_type {
+                        MessageInType::Rotation => match event_in.to_look_event() {
+                            Ok(event) => {
+                                session_handler_lock.send_event(player_id, event);
+                            }
+                            Err(_) => {}
+                        },
+                        MessageInType::Move => match event_in.to_move_event() {
+                            Ok(event) => {
+                                session_handler_lock.send_event(player_id, event);
+                            }
+                            Err(_) => {}
+                        },
+                        MessageInType::Fire => match event_in.to_fire_event() {
+                            Ok(event) => {
+                                session_handler_lock.send_event(player_id, event);
+                            }
+                            Err(_) => {}
+                        },
+                        MessageInType::Jump => match event_in.to_jump_event() {
+                            Ok(event) => {
+                                session_handler_lock.send_event(player_id, event);
+                            }
+                            Err(_) => {}
+                        },
 
-    // Optionally log an informational message
-    info!("Starting server...");
-
-    let enable_debug_metrics = env::var("DEBUG_METRICS").is_ok();
-    let enable_debug_cam = env::var("DEBUG_CAM").is_ok();
-    let mut app = App::new();
-
-    if !enable_debug_metrics && !enable_debug_cam {
-        app.add_plugins(MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(
-            Duration::from_secs_f64(1.0 / 120.0),
-        )));
-    } else {
-        app.add_plugins(DefaultPlugins)
-            // .add_plugins(LogDiagnosticsPlugin::default())
-            .add_plugins(FrameTimeDiagnosticsPlugin)
-            .add_plugins(EntityCountDiagnosticsPlugin)
-            .add_plugins(SystemInformationDiagnosticsPlugin)
-            .add_plugins(PerfUiPlugin)
-            .add_systems(PostStartup, set_debug_metrics);
-
-        if enable_debug_cam {
-            app.add_plugins(RapierDebugRenderPlugin::default())
-                .add_systems(PostStartup, set_debug_3d_render_camera)
-                .add_systems(Update, (move_debug_camera, look_debug_camera));
-        } else {
-            app.add_systems(PostStartup, set_debug_metrics_cam);
-        }
+                        MessageInType::Connect => match event_in.to_connect_event() {
+                            Ok(event) => {
+                                session_handler_lock.send_event(player_id, event);
+                            }
+                            Err(_) => {}
+                        },
+                        MessageInType::SessionCreate => match event_in.to_session_create_input() {
+                            Ok(input) => {
+                                let network_resource = NetworkResource {
+                                    server: server.clone(),
+                                    transport: transport.clone(),
+                                };
+                                let session_handler_clone = session_handler.clone();
+                                let handle = std::thread::spawn(|| {
+                                    session_handler_clone
+                                        .lock()
+                                        .unwrap()
+                                        .new_session(input, network_resource);
+                                });
+                            }
+                            Err(_) => {}
+                        },
+                        MessageInType::Invalid => {
+                            error!("Invalid MessageInType");
+                        }
+                    }
+                }
+            });
     }
 
-    app.add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
-        .add_systems(Startup, (setup, setup_level).chain())
-        .add_systems(
-            PreUpdate,
-            (handle_server_messages, handle_server_events).chain(),
-        )
-        .add_systems(
-            Update,
-            (
-                (
-                    handle_character_movement,
-                    handle_look_events,
-                    handle_fire_events,
-                    handle_hit_events,
-                    handle_connect_events,
-                    handle_disconnect_events,
-                )
-                    .in_set(MySet::HandleGameEvents)
-                    .after(MySet::HandleServer),
-                (on_transform_change, on_health_change)
-                    .in_set(MySet::HandleGameStateChanges)
-                    .after(MySet::HandleGameEvents),
-                transport_send_packets.after(MySet::HandleGameStateChanges),
-            ),
-        );
-    app.run();
+    Ok(())
 }

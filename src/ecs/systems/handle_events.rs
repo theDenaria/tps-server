@@ -1,7 +1,7 @@
 use std::f32::consts::PI;
 
 use bevy::prelude::*;
-use bevy_rapier3d::prelude::*;
+use bevy_rapier3d::{prelude::*, rapier::prelude::RigidBodySet};
 
 use crate::{
     constants::{GRAVITY, JUMP_SPEED, VELOCITY_MUL},
@@ -9,7 +9,7 @@ use crate::{
         components::{Health, MoveInput, Player, PlayerBundle, PlayerLookup, VerticalVelocity},
         events::{ConnectEvent, DisconnectEvent, FireEvent, HitEvent, LookEvent},
     },
-    server::{channel::DefaultChannel, message_out::MessageOut, server::MattaServer},
+    server::{channel::DefaultChannel, message_out::MessageOut, server::DenariaServer},
 };
 
 pub fn handle_character_movement(
@@ -57,7 +57,7 @@ pub fn handle_fire_events(
     query: Query<&Player>,
     rapier_context: Res<RapierContext>,
     mut hit_event: EventWriter<HitEvent>,
-    mut server: ResMut<MattaServer>,
+    mut server: ResMut<DenariaServer>,
 ) {
     let max_toi = f32::MAX;
     let solid = true;
@@ -160,7 +160,7 @@ pub fn handle_fire_events(
 pub fn handle_hit_events(
     mut hit_events: EventReader<HitEvent>,
     mut query: Query<(&Player, &mut Health)>,
-    mut server: ResMut<MattaServer>,
+    mut server: ResMut<DenariaServer>,
 ) {
     for event in hit_events.read() {
         tracing::info!("Hit event {:?}", event);
@@ -211,7 +211,7 @@ pub fn handle_disconnect_events(
     mut commands: Commands,
     mut disconnect_events: EventReader<DisconnectEvent>,
     mut player_lookup: ResMut<PlayerLookup>,
-    mut server: ResMut<MattaServer>,
+    mut server: ResMut<DenariaServer>,
 ) {
     if disconnect_events.len() > 0 {
         let mut disconnect_player_ids: Vec<&String> = vec![];
