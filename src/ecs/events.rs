@@ -2,24 +2,24 @@ use bevy::prelude::*;
 
 #[derive(Debug, Event)]
 pub struct MoveEvent {
-    pub player_id: String,
+    pub entity: Entity,
     pub x: f32,
     pub y: f32,
 }
 
 #[derive(Debug, Event)]
 pub struct LookEvent {
-    pub player_id: String,
+    pub entity: Entity,
     pub direction: Vec4,
 }
 #[derive(Event)]
 pub struct JumpEvent {
-    pub player_id: String,
+    pub entity: Entity,
 }
 
 #[derive(Event)]
 pub struct FireEvent {
-    pub player_id: String,
+    pub entity: Entity,
     pub cam_origin: Vec3,
     pub direction: Vec3,
     pub barrel_origin: Vec3,
