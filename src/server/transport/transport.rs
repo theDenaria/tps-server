@@ -18,6 +18,7 @@ use super::{
 };
 
 pub enum ToDenariaServerMessage {
+    #[allow(dead_code)]
     ClientConnected {
         client_id: u64,
         addr: SocketAddr,
@@ -88,10 +89,6 @@ impl ServerTransport {
         std::thread::spawn(move || {
             new_session(from_denaria_server_tx, rx);
         });
-    }
-
-    pub fn register_server(&mut self, server_id: u64, sender: Sender<ToDenariaServerMessage>) {
-        self.client_id_to_server_tx_map.insert(server_id, sender);
     }
 
     /// Returns the server public address

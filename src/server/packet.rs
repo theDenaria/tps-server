@@ -177,7 +177,9 @@ impl Packet {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SerializationError {
     BufferTooShort,
+    #[allow(dead_code)]
     InvalidNumSlices,
+    #[allow(dead_code)]
     InvalidAckRange,
     InvalidPacketType,
     InvalidChannelId,

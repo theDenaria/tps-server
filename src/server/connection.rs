@@ -32,7 +32,7 @@ struct PacketSent {
     sent_at: Duration,
     info: PacketSentInfo,
 }
-
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 enum PacketSentInfo {
     // No need to track info for unreliable messages
@@ -49,6 +49,7 @@ enum ChannelOrder {
     Unreliable(u8),
 }
 
+#[allow(dead_code)]
 /// Describes the stats of a connection.
 pub struct NetworkInfo {
     /// Round-trip Time

@@ -34,10 +34,3 @@ pub fn read_bytes<const N: usize>(src: &mut impl io::Read) -> Result<[u8; N], io
     src.read_exact(&mut data)?;
     Ok(data)
 }
-
-#[inline]
-pub fn read_i32(src: &mut impl io::Read) -> Result<i32, io::Error> {
-    let mut buffer = [0u8; 4];
-    src.read_exact(&mut buffer)?;
-    Ok(i32::from_le_bytes(buffer))
-}

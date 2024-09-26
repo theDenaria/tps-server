@@ -16,6 +16,7 @@ pub enum DisconnectReason {
     /// Failed to deserialize packet
     PacketDeserialization(SerializationError),
     /// Received message from channel with invalid id
+    #[allow(dead_code)]
     ReceivedInvalidChannelId(u8),
     /// Error occurred in a send channel
     SendChannelError { channel_id: u8, error: ChannelError },
@@ -29,6 +30,7 @@ pub enum ChannelError {
     /// Reliable channel reached maximum allowed memory
     ReliableChannelMaxMemoryReached,
     /// Received an invalid slice message in the channel.
+    #[allow(dead_code)]
     InvalidSliceMessage,
 }
 

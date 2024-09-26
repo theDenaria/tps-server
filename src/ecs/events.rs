@@ -29,6 +29,7 @@ pub struct FireEvent {
 pub struct HitEvent {
     pub hitter_id: String,
     pub hitten: Entity,
+    #[allow(dead_code)]
     pub weapon: String,
     pub point: Vec3,
 }
