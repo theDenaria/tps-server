@@ -1,7 +1,7 @@
 use std::f32::consts::PI;
 
 use bevy::prelude::*;
-use bevy_rapier3d::{prelude::*, rapier::prelude::RigidBodySet};
+use bevy_rapier3d::prelude::*;
 
 use crate::{
     constants::{GRAVITY, JUMP_SPEED, VELOCITY_MUL},
