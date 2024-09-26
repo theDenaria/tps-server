@@ -1,19 +1,19 @@
 use crate::ecs::events::{ConnectEvent, FireEvent, JumpEvent, LookEvent, MoveEvent};
 use crate::server::packet::SerializationError;
-use crate::sessions::SessionCreateInput;
 use bevy::math::{Vec3, Vec4};
+use bevy::prelude::Entity;
 use byteorder::{LittleEndian, ReadBytesExt};
-use std::io::{Cursor, Read};
+use std::io::Cursor;
 
 #[derive(Debug)]
 pub struct MessageIn {
-    pub player_id: String,
     pub event_type: MessageInType,
     pub data: Vec<u8>,
+    pub player_id: String,
 }
 
 impl MessageIn {
-    pub fn new(player_id: String, bytes: Vec<u8>) -> Result<MessageIn, &'static str> {
+    pub fn new(bytes: Vec<u8>, player_id: String) -> Result<MessageIn, &'static str> {
         if bytes.len() < 1 {
             return Err("Not enough bytes for EventIn");
         }
@@ -22,13 +22,13 @@ impl MessageIn {
         let data = &bytes[1..];
 
         Ok(MessageIn {
-            player_id,
             event_type,
             data: data.to_vec(),
+            player_id: player_id.clone(),
         })
     }
 
-    pub fn to_move_event(&self) -> Result<MoveEvent, SerializationError> {
+    pub fn to_move_event(&self, player_entity: Entity) -> Result<MoveEvent, SerializationError> {
         // let data_slice: &[u8] = &self.data;
         if self.data.len() < 8 {
             println!("Insufficent bytes: {:?}", self.data);
@@ -40,12 +40,12 @@ impl MessageIn {
         let y = reader.read_f32::<LittleEndian>()?;
 
         Ok(MoveEvent {
-            player_id: self.player_id.clone(),
+            entity: player_entity,
             x,
             y,
         })
     }
-    pub fn to_look_event(&self) -> Result<LookEvent, SerializationError> {
+    pub fn to_look_event(&self, player_entity: Entity) -> Result<LookEvent, SerializationError> {
         if self.data.len() < 12 {
             println!("Insufficent bytes: {:?}", self.data);
             return Err(SerializationError::BufferTooShort);
@@ -58,19 +58,14 @@ impl MessageIn {
         let w = reader.read_f32::<LittleEndian>()?;
 
         Ok(LookEvent {
-            player_id: self.player_id.clone(),
+            entity: player_entity,
             direction: Vec4::new(x, y, z, w),
         })
     }
 
-    pub fn to_jump_event(&self) -> Result<JumpEvent, SerializationError> {
-        if self.data.len() < 12 {
-            println!("Insufficent bytes: {:?}", self.data);
-            return Err(SerializationError::BufferTooShort);
-        }
-
+    pub fn to_jump_event(&self, player_entity: Entity) -> Result<JumpEvent, SerializationError> {
         Ok(JumpEvent {
-            player_id: self.player_id.clone(),
+            entity: player_entity,
         })
     }
 
@@ -87,7 +82,7 @@ impl MessageIn {
             player_id: self.player_id.clone(),
         })
     }
-    pub fn to_fire_event(&self) -> Result<FireEvent, SerializationError> {
+    pub fn to_fire_event(&self, player_entity: Entity) -> Result<FireEvent, SerializationError> {
         if self.data.len() < 8 {
             println!("Insufficent bytes: {:?}", self.data);
             return Err(SerializationError::BufferTooShort);
@@ -111,33 +106,11 @@ impl MessageIn {
         let barrel_origin = Vec3::new(barrel_origin_x, barrel_origin_y, barrel_origin_z);
 
         Ok(FireEvent {
-            player_id: self.player_id.clone(),
+            entity: player_entity,
             cam_origin,
             direction,
             barrel_origin,
         })
-    }
-
-    pub fn to_session_create_input(&self) -> Result<SessionCreateInput, SerializationError> {
-        if self.data.len() < 10 {
-            println!("Insufficent bytes: {:?}", self.data);
-            return Err(SerializationError::BufferTooShort);
-        }
-        let mut reader = Cursor::new(&self.data);
-
-        let id = reader.read_u64::<LittleEndian>()?;
-
-        let players_len = reader.read_u16::<LittleEndian>()?;
-
-        let mut players: Vec<(String, u8)> = vec![];
-
-        for _ in 0..players_len {
-            let mut player_id = String::new();
-            reader.read_to_string(&mut player_id)?;
-            let team = reader.read_u8()?;
-            players.push((player_id, team));
-        }
-        Ok(SessionCreateInput { id, players })
     }
 }
 
@@ -149,7 +122,7 @@ pub enum MessageInType {
     Jump = 4,
     Fire = 5,
     Invalid = 99,
-    SessionCreate = 100,
+    // SessionCreate = 100,
     // SessionJoin = 101,
 }
 
@@ -163,6 +136,7 @@ impl TryFrom<u8> for MessageInType {
             3 => Ok(MessageInType::Rotation),
             4 => Ok(MessageInType::Jump),
             5 => Ok(MessageInType::Fire),
+            // 100 => Ok(MessageInType::SessionCreate),
             _ => Ok(MessageInType::Invalid),
         }
     }
