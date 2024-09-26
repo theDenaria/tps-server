@@ -37,6 +37,9 @@ fn main() -> io::Result<()> {
 
     let mut transport = ServerTransport::new(server_config, socket)?;
 
+    // create default session with player_ids from player1 to player10
+    transport.create_session(0, (1..=10).map(|i| format!("player{}", i)).collect());
+
     loop {
         transport.update(TICK_DELTA).unwrap();
 
