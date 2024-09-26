@@ -9,9 +9,6 @@ pub struct Player {
 pub struct Health(pub f32);
 
 #[derive(Debug, Component)]
-pub struct FireOn(pub bool);
-
-#[derive(Debug, Component)]
 pub struct VerticalVelocity(pub f32);
 
 #[derive(Debug, Component)]
@@ -26,7 +23,6 @@ pub struct PlayerBundle {
     pub player: Player,
     pub health: Health,
     pub move_input: MoveInput,
-    pub fire_on: FireOn,
     pub v_velocity: VerticalVelocity,
 }
 
@@ -40,7 +36,6 @@ impl Default for PlayerBundle {
                 y: 0.0,
                 z: 0.0,
             },
-            fire_on: FireOn(false),
             v_velocity: VerticalVelocity(0.0),
         }
     }
