@@ -27,3 +27,4 @@ bevy = {version = "0.14", features= ["bevy_dev_tools"]}
 bevy_rapier3d = { version = "0.27.0", default-features = false, features = [ "dim3", "simd-stable", "serde-serialize", "debug-render-3d" ] }
 iyes_perf_ui = "0.3"
 dotenvy = "0.15"
+crossbeam = "0.8"
