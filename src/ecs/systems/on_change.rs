@@ -5,13 +5,13 @@ use bevy::{
 
 use crate::{
     ecs::components::{Health, Player},
-    server::{channel::DefaultChannel, message_out::MessageOut, server::MattaServer},
+    server::{channel::DefaultChannel, message_out::MessageOut, server::DenariaServer},
 };
 
 // Gets the Position component of all Entities whose Velocity has changed since the last run of the System
 pub fn on_transform_change(
     query: Query<(&Player, &Transform), Changed<Transform>>,
-    mut server: ResMut<MattaServer>,
+    mut server: ResMut<DenariaServer>,
 ) {
     let mut positions: Vec<(Vec3, String)> = vec![];
     let mut rotations: Vec<(Quat, String)> = vec![];
@@ -32,7 +32,7 @@ pub fn on_transform_change(
 
 pub fn on_health_change(
     query: Query<(&Player, &Health), Changed<Health>>,
-    mut server: ResMut<MattaServer>,
+    mut server: ResMut<DenariaServer>,
 ) {
     let mut healths: Vec<(String, f32)> = vec![];
     for (player, health) in &query {

@@ -3,10 +3,12 @@ use std::time::Duration;
 
 use bevy::prelude::Resource;
 use bytes::Bytes;
+use crossbeam::channel::{Receiver, Sender};
 
 use super::connection::{ConnectionConfig, NetworkInfo, UnityClient};
 use super::error::{ClientNotFound, DisconnectReason};
 use super::packet::Payload;
+use super::transport::transport::{FromDenariaServerMessage, ToDenariaServerMessage};
 
 /// Connection and disconnection events in the server.
 #[derive(Debug, PartialEq, Eq)]
@@ -22,20 +24,28 @@ pub enum ServerEvent {
 }
 
 #[derive(Debug, Resource)]
-pub struct MattaServer {
+pub struct DenariaServer {
     connections: HashMap<ClientId, UnityClient>,
     player_connection_map: HashMap<String, ClientId>,
     connection_config: ConnectionConfig,
     events: VecDeque<ServerEvent>,
+    from_transport_server_rx: Receiver<ToDenariaServerMessage>,
+    to_transport_server_tx: Sender<FromDenariaServerMessage>,
 }
 
-impl MattaServer {
-    pub fn new(connection_config: ConnectionConfig) -> Self {
+impl DenariaServer {
+    pub fn new(
+        connection_config: ConnectionConfig,
+        from_transport_server_rx: Receiver<ToDenariaServerMessage>,
+        to_transport_server_tx: Sender<FromDenariaServerMessage>,
+    ) -> Self {
         Self {
             connections: HashMap::new(),
             player_connection_map: HashMap::new(),
             connection_config,
             events: VecDeque::new(),
+            from_transport_server_rx,
+            to_transport_server_tx,
         }
     }
 
@@ -323,6 +333,43 @@ impl MattaServer {
                 Ok(())
             }
             None => Err(ClientNotFound),
+        }
+    }
+
+    pub fn process_server_transport_messages(&mut self) {
+        while let Ok(message) = self.from_transport_server_rx.try_recv() {
+            match message {
+                ToDenariaServerMessage::ClientConnected {
+                    client_id,
+                    addr: _,
+                    payload: _,
+                    player_id,
+                } => {
+                    self.add_connection(ClientId::from_raw(client_id), player_id);
+                }
+                ToDenariaServerMessage::ClientDisconnected { client_id } => {
+                    self.remove_connection(ClientId::from_raw(client_id));
+                }
+                ToDenariaServerMessage::Payload { client_id, payload } => {
+                    if let Err(e) =
+                        self.process_packet_from(payload.as_slice(), ClientId::from_raw(client_id))
+                    {
+                        tracing::error!("Failed to process packet from client: {:?}", e);
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn send_packets_to_server_transport(&mut self, client_id: ClientId, packets: Vec<Vec<u8>>) {
+        if let Err(e) = self
+            .to_transport_server_tx
+            .send(FromDenariaServerMessage::SendPacket {
+                client_id: client_id.raw(),
+                packets,
+            })
+        {
+            tracing::error!("Failed to send packet to server transport: {:?}", e);
         }
     }
 }

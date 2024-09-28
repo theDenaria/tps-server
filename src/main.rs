@@ -1,110 +1,51 @@
-#![allow(dead_code)]
-use std::{env, io, time::Duration};
+use std::{
+    io,
+    net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket},
+    time::SystemTime,
+};
 mod constants;
 mod ecs;
 mod server;
+mod sessions;
 
-use bevy_rapier3d::{
-    plugin::{NoUserData, RapierPhysicsPlugin},
-    render::RapierDebugRenderPlugin,
-};
-use ecs::systems::{
-    debug::{
-        look_debug_camera, move_debug_camera, set_debug_3d_render_camera, set_debug_metrics,
-        set_debug_metrics_cam,
-    },
-    handle_events::{
-        handle_character_movement, handle_connect_events, handle_disconnect_events,
-        handle_fire_events, handle_hit_events, handle_look_events,
-    },
-    handle_server::{handle_server_events, handle_server_messages, transport_send_packets},
-    on_change::{on_health_change, on_transform_change},
-    setup::{setup, setup_level},
-};
+use constants::TICK_DELTA;
+use server::transport::{server::server::ServerConfig, transport::ServerTransport};
+use tracing_subscriber::EnvFilter;
 
-use bevy::{
-    app::ScheduleRunnerPlugin,
-    diagnostic::{
-        EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin,
-        SystemInformationDiagnosticsPlugin,
-    },
-    prelude::*,
-};
-
-use iyes_perf_ui::prelude::*;
-
-// #[tokio::main]
 fn main() -> io::Result<()> {
-    start_server();
-    Ok(())
-}
+    let subscriber = tracing_subscriber::fmt::Subscriber::builder()
+        .with_env_filter(EnvFilter::from_default_env())
+        .with_thread_ids(true)
+        .with_thread_names(true)
+        .finish();
 
-#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
-enum MySet {
-    HandleServer,
-    HandleGameEvents,
-    Physics,
-    HandleGameStateChanges,
-}
+    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
-fn start_server() {
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::TRACE)
-        .init();
+    // Now the tracing macros can be used throughout your application
+    tracing::info!("This will dynamically update on the terminal");
 
-    // Optionally log an informational message
-    info!("Starting server...");
+    // Setup transport layer
+    const SERVER_ADDR: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 5000);
+    let socket: UdpSocket = UdpSocket::bind(SERVER_ADDR)?;
+    let server_config = ServerConfig {
+        current_time: SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap(),
+        max_clients: 64,
+        public_addresses: vec![SERVER_ADDR],
+    };
 
-    let enable_debug_metrics = env::var("DEBUG_METRICS").is_ok();
-    let enable_debug_cam = env::var("DEBUG_CAM").is_ok();
-    let mut app = App::new();
+    let mut transport = ServerTransport::new(server_config, socket)?;
 
-    if !enable_debug_metrics && !enable_debug_cam {
-        app.add_plugins(MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(
-            Duration::from_secs_f64(1.0 / 120.0),
-        )));
-    } else {
-        app.add_plugins(DefaultPlugins)
-            // .add_plugins(LogDiagnosticsPlugin::default())
-            .add_plugins(FrameTimeDiagnosticsPlugin)
-            .add_plugins(EntityCountDiagnosticsPlugin)
-            .add_plugins(SystemInformationDiagnosticsPlugin)
-            .add_plugins(PerfUiPlugin)
-            .add_systems(PostStartup, set_debug_metrics);
+    // create default session with player_ids from player1 to player10
+    transport.create_session(0, (1..=10).map(|i| format!("player{}", i)).collect());
 
-        if enable_debug_cam {
-            app.add_plugins(RapierDebugRenderPlugin::default())
-                .add_systems(PostStartup, set_debug_3d_render_camera)
-                .add_systems(Update, (move_debug_camera, look_debug_camera));
-        } else {
-            app.add_systems(PostStartup, set_debug_metrics_cam);
-        }
+    loop {
+        transport.update(TICK_DELTA).unwrap();
+
+        transport.send_packets();
+
+        // make this loop run 60 times per second
+        std::thread::sleep(std::time::Duration::from_millis(16));
     }
-
-    app.add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
-        .add_systems(Startup, (setup, setup_level).chain())
-        .add_systems(
-            PreUpdate,
-            (handle_server_messages, handle_server_events).chain(),
-        )
-        .add_systems(
-            Update,
-            (
-                (
-                    handle_character_movement,
-                    handle_look_events,
-                    handle_fire_events,
-                    handle_hit_events,
-                    handle_connect_events,
-                    handle_disconnect_events,
-                )
-                    .in_set(MySet::HandleGameEvents)
-                    .after(MySet::HandleServer),
-                (on_transform_change, on_health_change)
-                    .in_set(MySet::HandleGameStateChanges)
-                    .after(MySet::HandleGameEvents),
-                transport_send_packets.after(MySet::HandleGameStateChanges),
-            ),
-        );
-    app.run();
 }

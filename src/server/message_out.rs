@@ -6,6 +6,8 @@ use crate::ecs::systems::setup::LevelObject;
 
 #[derive(Debug)]
 pub struct MessageOut {
+    // allow dead code because we have some unused message types
+    #[allow(dead_code)]
     pub event_type: MessageOutType,
     pub data: Vec<u8>,
 }

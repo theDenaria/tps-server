@@ -1,8 +1,6 @@
 use std::{
     io::{BufReader, BufWriter, Error},
-    net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket},
     path::Path,
-    time::SystemTime,
     vec,
 };
 
@@ -18,38 +16,16 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Runtime;
 
-use crate::{
-    ecs::{
-        components::PlayerLookup,
-        events::{ConnectEvent, DisconnectEvent, FireEvent, HitEvent, LookEvent},
-    },
-    server::{
-        connection::ConnectionConfig,
-        server::MattaServer,
-        transport::{server::server::ServerConfig, transport::ServerTransport},
-    },
+use crate::ecs::{
+    components::PlayerLookup,
+    events::{ConnectEvent, DisconnectEvent, FireEvent, HitEvent, JumpEvent, LookEvent, MoveEvent},
 };
 
 pub fn setup(mut commands: Commands) {
-    let server = MattaServer::new(ConnectionConfig::default());
-    // Setup transport layer
-    const SERVER_ADDR: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 5000);
-    let socket: UdpSocket = UdpSocket::bind(SERVER_ADDR).unwrap();
-    let server_config = ServerConfig {
-        current_time: SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap(),
-        max_clients: 64,
-        public_addresses: vec![SERVER_ADDR],
-    };
-    let transport = ServerTransport::new(server_config, socket).unwrap();
-
     let objects: Vec<LevelObject> = vec![];
 
     let level_objects = LevelObjects { objects };
 
-    commands.insert_resource(server);
-    commands.insert_resource(transport);
     commands.insert_resource(PlayerLookup::new());
     commands.insert_resource(level_objects);
 
@@ -58,6 +34,8 @@ pub fn setup(mut commands: Commands) {
     commands.insert_resource(Events::<LookEvent>::default());
     commands.insert_resource(Events::<FireEvent>::default());
     commands.insert_resource(Events::<HitEvent>::default());
+    commands.insert_resource(Events::<MoveEvent>::default());
+    commands.insert_resource(Events::<JumpEvent>::default());
 }
 
 pub fn setup_level(par_commands: ParallelCommands, mut level_objects: ResMut<LevelObjects>) {

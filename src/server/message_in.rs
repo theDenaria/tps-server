@@ -1,13 +1,19 @@
-use bevy::math::Vec3;
+use crate::ecs::events::{ConnectEvent, FireEvent, JumpEvent, LookEvent, MoveEvent};
+use crate::server::packet::SerializationError;
+use bevy::math::{Vec3, Vec4};
+use bevy::prelude::Entity;
+use byteorder::{LittleEndian, ReadBytesExt};
+use std::io::Cursor;
 
 #[derive(Debug)]
 pub struct MessageIn {
     pub event_type: MessageInType,
     pub data: Vec<u8>,
+    pub player_id: String,
 }
 
 impl MessageIn {
-    pub fn new(bytes: Vec<u8>) -> Result<MessageIn, &'static str> {
+    pub fn new(bytes: Vec<u8>, player_id: String) -> Result<MessageIn, &'static str> {
         if bytes.len() < 1 {
             return Err("Not enough bytes for EventIn");
         }
@@ -18,6 +24,92 @@ impl MessageIn {
         Ok(MessageIn {
             event_type,
             data: data.to_vec(),
+            player_id: player_id.clone(),
+        })
+    }
+
+    pub fn to_move_event(&self, player_entity: Entity) -> Result<MoveEvent, SerializationError> {
+        // let data_slice: &[u8] = &self.data;
+        if self.data.len() < 8 {
+            println!("Insufficent bytes: {:?}", self.data);
+            return Err(SerializationError::BufferTooShort);
+        }
+        let mut reader = Cursor::new(&self.data);
+
+        let x = reader.read_f32::<LittleEndian>()?;
+        let y = reader.read_f32::<LittleEndian>()?;
+
+        Ok(MoveEvent {
+            entity: player_entity,
+            x,
+            y,
+        })
+    }
+    pub fn to_look_event(&self, player_entity: Entity) -> Result<LookEvent, SerializationError> {
+        if self.data.len() < 12 {
+            println!("Insufficent bytes: {:?}", self.data);
+            return Err(SerializationError::BufferTooShort);
+        }
+        let mut reader = Cursor::new(&self.data);
+
+        let x = reader.read_f32::<LittleEndian>()?;
+        let y = reader.read_f32::<LittleEndian>()?;
+        let z = reader.read_f32::<LittleEndian>()?;
+        let w = reader.read_f32::<LittleEndian>()?;
+
+        Ok(LookEvent {
+            entity: player_entity,
+            direction: Vec4::new(x, y, z, w),
+        })
+    }
+
+    pub fn to_jump_event(&self, player_entity: Entity) -> Result<JumpEvent, SerializationError> {
+        Ok(JumpEvent {
+            entity: player_entity,
+        })
+    }
+
+    pub fn to_connect_event(&self) -> Result<ConnectEvent, SerializationError> {
+        if self.data.len() < 1 {
+            println!("Insufficent bytes: {:?}", self.data);
+            return Err(SerializationError::BufferTooShort);
+        }
+
+        let _message =
+            String::from_utf8(self.data.clone()).map_err(|_| SerializationError::CursorReadError);
+
+        Ok(ConnectEvent {
+            player_id: self.player_id.clone(),
+        })
+    }
+    pub fn to_fire_event(&self, player_entity: Entity) -> Result<FireEvent, SerializationError> {
+        if self.data.len() < 8 {
+            println!("Insufficent bytes: {:?}", self.data);
+            return Err(SerializationError::BufferTooShort);
+        }
+        let mut reader = Cursor::new(&self.data);
+
+        let cam_origin_x = reader.read_f32::<LittleEndian>()?;
+        let cam_origin_y = reader.read_f32::<LittleEndian>()?;
+        let cam_origin_z = reader.read_f32::<LittleEndian>()?;
+
+        let direction_x = reader.read_f32::<LittleEndian>()?;
+        let direction_y = reader.read_f32::<LittleEndian>()?;
+        let direction_z = reader.read_f32::<LittleEndian>()?;
+
+        let barrel_origin_x = reader.read_f32::<LittleEndian>()?;
+        let barrel_origin_y = reader.read_f32::<LittleEndian>()?;
+        let barrel_origin_z = reader.read_f32::<LittleEndian>()?;
+
+        let cam_origin = Vec3::new(cam_origin_x, cam_origin_y, cam_origin_z);
+        let direction = Vec3::new(direction_x, direction_y, direction_z);
+        let barrel_origin = Vec3::new(barrel_origin_x, barrel_origin_y, barrel_origin_z);
+
+        Ok(FireEvent {
+            entity: player_entity,
+            cam_origin,
+            direction,
+            barrel_origin,
         })
     }
 }
@@ -30,39 +122,8 @@ pub enum MessageInType {
     Jump = 4,
     Fire = 5,
     Invalid = 99,
-}
-
-#[derive(Debug)]
-pub struct MoveMessageIn {
-    pub x: f32,
-    pub y: f32,
-}
-
-#[derive(Debug)]
-pub struct RotationMessageIn {
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
-    pub w: f32,
-}
-
-#[derive(Debug)]
-pub struct FireMessageIn {
-    pub cam_origin: Vec3,
-    pub direction: Vec3,
-    pub barrel_origin: Vec3,
-}
-
-pub struct Jump {}
-
-#[derive(Debug)]
-pub struct ConnectMessageIn {
-    pub message: String,
-}
-
-#[derive(Debug)]
-pub struct DisconnectMessageIn {
-    pub message: String,
+    // SessionCreate = 100,
+    // SessionJoin = 101,
 }
 
 impl TryFrom<u8> for MessageInType {
@@ -75,129 +136,8 @@ impl TryFrom<u8> for MessageInType {
             3 => Ok(MessageInType::Rotation),
             4 => Ok(MessageInType::Jump),
             5 => Ok(MessageInType::Fire),
+            // 100 => Ok(MessageInType::SessionCreate),
             _ => Ok(MessageInType::Invalid),
         }
     }
-}
-
-pub fn digest_move_message(data: Vec<u8>) -> Result<MoveMessageIn, &'static str> {
-    if data.len() < 8 {
-        println!("Insufficent bytes: {:?}", data);
-        return Err("Insufficient bytes for MoveInputUpdate");
-    }
-
-    let x_bytes = data[0..4]
-        .try_into()
-        .map_err(|_| "Failed to slice x bytes")?;
-    let y_bytes = data[4..8]
-        .try_into()
-        .map_err(|_| "Failed to slice y bytes")?;
-
-    let x = f32::from_ne_bytes(x_bytes);
-    let y = f32::from_ne_bytes(y_bytes);
-
-    Ok(MoveMessageIn { x, y })
-}
-
-pub fn digest_rotation_message(data: Vec<u8>) -> Result<RotationMessageIn, &'static str> {
-    if data.len() < 12 {
-        println!("Insufficent bytes: {:?}", data);
-        return Err("Insufficient bytes for Rotation");
-    }
-
-    let rotation_bytes_x = data[0..4]
-        .try_into()
-        .map_err(|_| "Failed to slice x bytes")?;
-    let rotation_bytes_y = data[4..8]
-        .try_into()
-        .map_err(|_| "Failed to slice x bytes")?;
-    let rotation_bytes_z = data[8..12]
-        .try_into()
-        .map_err(|_| "Failed to slice x bytes")?;
-    let rotation_bytes_w = data[12..16]
-        .try_into()
-        .map_err(|_| "Failed to slice x bytes")?;
-
-    let rotation_x = f32::from_ne_bytes(rotation_bytes_x);
-    let rotation_y = f32::from_ne_bytes(rotation_bytes_y);
-    let rotation_z = f32::from_ne_bytes(rotation_bytes_z);
-    let rotation_w = f32::from_ne_bytes(rotation_bytes_w);
-
-    Ok(RotationMessageIn {
-        x: rotation_x,
-        y: rotation_y,
-        z: rotation_z,
-        w: rotation_w,
-    })
-}
-
-pub fn digest_connect_message(data: Vec<u8>) -> Result<ConnectMessageIn, &'static str> {
-    if data.len() < 1 {
-        return Err("Insufficient bytes for Connect");
-    }
-
-    let message = String::from_utf8(data).map_err(|_| "Invalid UTF-8 in player_id")?;
-
-    Ok(ConnectMessageIn { message })
-}
-
-pub fn digest_fire_message(data: Vec<u8>) -> Result<FireMessageIn, &'static str> {
-    if data.len() < 8 {
-        println!("Insufficent bytes: {:?}", data);
-        return Err("Insufficient bytes for MoveInputUpdate");
-    }
-
-    let cam_origin_x_bytes = data[0..4]
-        .try_into()
-        .map_err(|_| "Failed to slice x bytes")?;
-    let cam_origin_y_bytes = data[4..8]
-        .try_into()
-        .map_err(|_| "Failed to slice y bytes")?;
-    let cam_origin_z_bytes = data[8..12]
-        .try_into()
-        .map_err(|_| "Failed to slice y bytes")?;
-
-    let direction_x_bytes = data[12..16]
-        .try_into()
-        .map_err(|_| "Failed to slice x bytes")?;
-    let direction_y_bytes = data[16..20]
-        .try_into()
-        .map_err(|_| "Failed to slice y bytes")?;
-    let direction_z_bytes = data[20..24]
-        .try_into()
-        .map_err(|_| "Failed to slice y bytes")?;
-
-    let barrel_origin_x_bytes = data[24..28]
-        .try_into()
-        .map_err(|_| "Failed to slice x bytes")?;
-    let barrel_origin_y_bytes = data[28..32]
-        .try_into()
-        .map_err(|_| "Failed to slice y bytes")?;
-    let barrel_origin_z_bytes = data[32..36]
-        .try_into()
-        .map_err(|_| "Failed to slice y bytes")?;
-
-    let cam_origin = Vec3::new(
-        f32::from_ne_bytes(cam_origin_x_bytes),
-        f32::from_ne_bytes(cam_origin_y_bytes),
-        f32::from_ne_bytes(cam_origin_z_bytes),
-    );
-
-    let direction = Vec3::new(
-        f32::from_ne_bytes(direction_x_bytes),
-        f32::from_ne_bytes(direction_y_bytes),
-        f32::from_ne_bytes(direction_z_bytes),
-    );
-
-    let barrel_origin = Vec3::new(
-        f32::from_ne_bytes(barrel_origin_x_bytes),
-        f32::from_ne_bytes(barrel_origin_y_bytes),
-        f32::from_ne_bytes(barrel_origin_z_bytes),
-    );
-
-    Ok(FireMessageIn {
-        cam_origin,
-        direction,
-        barrel_origin,
-    })
 }

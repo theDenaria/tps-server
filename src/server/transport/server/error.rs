@@ -2,6 +2,8 @@ use std::{error, fmt, io};
 
 use crate::{constants::TRANSPORT_MAX_PAYLOAD_BYTES, server::error::DisconnectReason};
 
+// allow dead code because we have some unused message types
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum TransportServerError {
     /// The type of the packet is invalid.
