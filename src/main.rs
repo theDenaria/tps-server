@@ -25,7 +25,7 @@ fn main() -> io::Result<()> {
     tracing::info!("This will dynamically update on the terminal");
 
     // Setup transport layer
-    const SERVER_ADDR: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 5000);
+    const SERVER_ADDR: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 5001);
     let socket: UdpSocket = UdpSocket::bind(SERVER_ADDR)?;
     let server_config = ServerConfig {
         current_time: SystemTime::now()
