@@ -1,6 +1,6 @@
 use bevy::{
     math::{Quat, Vec3},
-    prelude::{Changed, Query, ResMut, Transform},
+    prelude::{Added, Changed, Query, ResMut, Transform},
 };
 
 use crate::{
@@ -42,5 +42,18 @@ pub fn on_health_change(
         tracing::info!("Sending health messages: {:?}", healths);
         let health_message = MessageOut::health_message(healths);
         server.broadcast_message(DefaultChannel::ReliableOrdered, health_message.data);
+    }
+}
+
+pub fn on_spawn_change(
+    query: Query<(&Player, &Transform), Added<Transform>>,
+    mut server: ResMut<DenariaServer>,
+) {
+    for (player, transform) in &query {
+        if let Some(spawn_message) =
+            MessageOut::spawn_message(player.id.clone(), transform.translation, transform.rotation)
+        {
+            server.broadcast_message(DefaultChannel::ReliableOrdered, spawn_message.data);
+        }
     }
 }

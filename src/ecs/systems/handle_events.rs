@@ -7,7 +7,7 @@ use crate::{
     constants::{GRAVITY, JUMP_SPEED, VELOCITY_MUL},
     ecs::{
         components::{Health, MoveInput, Player, PlayerBundle, PlayerLookup, VerticalVelocity},
-        events::{ConnectEvent, DisconnectEvent, FireEvent, HitEvent, LookEvent},
+        events::{DisconnectEvent, FireEvent, HitEvent, LookEvent, SpawnEvent},
     },
     server::{channel::DefaultChannel, message_out::MessageOut, server::DenariaServer},
 };
@@ -36,7 +36,10 @@ pub fn handle_character_movement(
         move_input.z = 0.0;
 
         movement.y = v_velocity.0;
-        controller.translation = Some(movement);
+
+        if (movement != Vec3::ZERO) {
+            controller.translation = Some(movement);
+        }
     }
 }
 
@@ -174,12 +177,12 @@ pub fn handle_hit_events(
     }
 }
 
-pub fn handle_connect_events(
+pub fn handle_spawn_events(
     mut commands: Commands,
-    mut connect_events: EventReader<ConnectEvent>,
+    mut spawn_events: EventReader<SpawnEvent>,
     mut player_lookup: ResMut<PlayerLookup>,
 ) {
-    for event in connect_events.read() {
+    for event in spawn_events.read() {
         if !player_lookup.map.contains_key(&event.player_id) {
             let initial_translation = Vec3::new(25.0, 20.0, -10.0);
             let entity = commands

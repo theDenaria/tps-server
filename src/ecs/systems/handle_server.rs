@@ -4,7 +4,7 @@ use crate::{
     constants::TICK_DELTA,
     ecs::{
         components::{MoveInput, PlayerLookup},
-        events::{ConnectEvent, DisconnectEvent, FireEvent, LookEvent},
+        events::{DisconnectEvent, FireEvent, LookEvent, SpawnEvent},
     },
     server::{
         channel::DefaultChannel,
@@ -41,7 +41,7 @@ pub fn handle_server_events(
 pub fn handle_server_messages(
     mut server: ResMut<DenariaServer>,
     player_lookup: Res<PlayerLookup>,
-    mut connect_event: EventWriter<ConnectEvent>,
+    mut spawn_event: EventWriter<SpawnEvent>,
     mut move_query: Query<&mut MoveInput>,
     mut look_event: EventWriter<LookEvent>,
     mut fire_event: EventWriter<FireEvent>,
@@ -112,11 +112,11 @@ pub fn handle_server_messages(
                         }
                     }
                 }
-                MessageInType::Connect => match event_in.to_connect_event() {
+                MessageInType::Spawn => match event_in.to_spawn_event() {
                     Ok(event) => {
-                        tracing::info!("Sending connect event to session");
-                        connect_event.send(event);
-                        tracing::info!("Sent connect event to session");
+                        tracing::info!("Sending spawn event to session");
+                        spawn_event.send(event);
+                        tracing::info!("Sent spawn event to session");
                     }
                     Err(_) => {}
                 },

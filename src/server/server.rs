@@ -351,6 +351,11 @@ impl DenariaServer {
                     self.remove_connection(ClientId::from_raw(client_id));
                 }
                 ToDenariaServerMessage::Payload { client_id, payload } => {
+                    tracing::debug!(
+                        "Received payload from client: {:?}: payload: {:?}",
+                        client_id,
+                        payload
+                    );
                     if let Err(e) =
                         self.process_packet_from(payload.as_slice(), ClientId::from_raw(client_id))
                     {
